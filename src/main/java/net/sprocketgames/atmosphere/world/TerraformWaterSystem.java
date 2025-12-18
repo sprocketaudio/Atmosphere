@@ -104,25 +104,28 @@ public final class TerraformWaterSystem {
                 int localZ = (column >>> 4) & 15;
                 int worldX = chunk.getPos().getMinBlockX() + localX;
                 int worldZ = chunk.getPos().getMinBlockZ() + localZ;
-                int columnTop = chunk.getHeight(Heightmap.Types.MOTION_BLOCKING, localX, localZ);
-                int topY = Math.min(level.getMaxBuildHeight() - 1, Math.max(waterLevel, columnTop));
+                int surfaceAirY = chunk.getHeight(Heightmap.Types.MOTION_BLOCKING, localX, localZ);
+                int topY = Math.min(level.getMaxBuildHeight() - 1, Math.max(waterLevel, surfaceAirY));
 
                 for (int y = topY; y >= minY; y--) {
                     cursor.set(worldX, y, worldZ);
-                    boolean skyVisible = level.canSeeSkyFromBelowWater(cursor);
+                    boolean skyConnected = y >= surfaceAirY;
 
-                    if (!skyVisible && y < waterLevel) {
-                        // We have hit solid terrain that blocks the sky, so deeper positions cannot fill.
-                        break;
-                    }
-
-                    boolean waterAllowed = skyVisible && y <= waterLevel;
                     BlockState state = chunk.getBlockState(cursor);
                     boolean isWater = state.getFluidState().is(FluidTags.WATER);
 
-                    if (isWater && !waterAllowed) {
+                    if (isWater && y > waterLevel) {
                         chunk.setBlockState(cursor, air, false);
-                    } else if (waterAllowed && (state.isAir() || state.getFluidState().isEmpty())) {
+                        continue;
+                    }
+
+                    if (!skyConnected && y < waterLevel) {
+                        // Below the first motion-blocking block; nothing deeper can connect to the sky.
+                        break;
+                    }
+
+                    boolean waterAllowed = skyConnected && y <= waterLevel;
+                    if (waterAllowed && (state.isAir() || state.getFluidState().isEmpty())) {
                         chunk.setBlockState(cursor, water, false);
                     }
                 }
