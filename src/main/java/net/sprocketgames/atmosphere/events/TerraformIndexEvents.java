@@ -54,13 +54,25 @@ public class TerraformIndexEvents {
             return;
         }
 
+        // Prevent duplicate scheduling while this chunk is being processed.
+        data.markChunkProcessed(chunkKey);
+        Atmosphere.LOGGER.debug("Queueing water strip for chunk {}", chunkPos);
+
         if (!serverLevel.hasChunk(chunkPos.x, chunkPos.z)) {
             return;
         }
 
-        // Strip naturally generated water when an Overworld chunk is first loaded.
-        clearWaterFromChunk(serverLevel, levelChunk);
-        data.markChunkProcessed(chunkKey);
+        serverLevel.getServer().execute(() -> {
+            if (!serverLevel.hasChunk(chunkPos.x, chunkPos.z)) {
+                return;
+            }
+
+            long startNanos = System.nanoTime();
+            LevelChunk liveChunk = serverLevel.getChunk(chunkPos.x, chunkPos.z);
+            int removed = clearWaterFromChunk(serverLevel, liveChunk);
+            long durationMs = (System.nanoTime() - startNanos) / 1_000_000L;
+            Atmosphere.LOGGER.info("Stripped {} water blocks from chunk {} in {} ms", removed, chunkPos, durationMs);
+        });
     }
 
     public static void onWaterPlaced(BlockEvent.EntityPlaceEvent event) {
@@ -88,10 +100,11 @@ public class TerraformIndexEvents {
         }
     }
 
-    private static void clearWaterFromChunk(ServerLevel level, LevelChunk chunk) {
+    private static int clearWaterFromChunk(ServerLevel level, LevelChunk chunk) {
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         int chunkMinX = chunk.getPos().getMinBlockX();
         int chunkMinZ = chunk.getPos().getMinBlockZ();
+        int removed = 0;
 
         LevelChunkSection[] sections = chunk.getSections();
         for (int sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
@@ -114,9 +127,12 @@ public class TerraformIndexEvents {
 
                         cursor.set(chunkMinX + x, sectionMinY + y, chunkMinZ + z);
                         level.setBlock(cursor, Blocks.AIR.defaultBlockState(), Block.UPDATE_NONE);
+                        removed++;
                     }
                 }
             }
         }
+
+        return removed;
     }
 }
