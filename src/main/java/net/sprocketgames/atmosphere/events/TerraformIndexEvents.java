@@ -2,6 +2,7 @@ package net.sprocketgames.atmosphere.events;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
@@ -46,15 +47,24 @@ public class TerraformIndexEvents {
             return;
         }
 
-        long chunkKey = levelChunk.getPos().toLong();
+        ChunkPos chunkPos = levelChunk.getPos();
+        long chunkKey = chunkPos.toLong();
         TerraformIndexData data = TerraformIndexData.get(serverLevel);
         if (data.isChunkProcessed(chunkKey)) {
             return;
         }
 
-        // Strip naturally generated water when an Overworld chunk is first loaded.
-        clearWaterFromChunk(serverLevel, levelChunk);
-        data.markChunkProcessed(chunkKey);
+        // Ensure chunk mutation occurs on the main server thread to avoid worldgen deadlocks.
+        serverLevel.getServer().execute(() -> {
+            if (!serverLevel.isLoaded(chunkPos)) {
+                return;
+            }
+
+            LevelChunk liveChunk = serverLevel.getChunk(chunkPos.x, chunkPos.z);
+            // Strip naturally generated water when an Overworld chunk is first loaded.
+            clearWaterFromChunk(serverLevel, liveChunk);
+            data.markChunkProcessed(chunkKey);
+        });
     }
 
     public static void onWaterPlaced(BlockEvent.EntityPlaceEvent event) {
