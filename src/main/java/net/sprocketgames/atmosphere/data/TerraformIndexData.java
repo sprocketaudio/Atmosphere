@@ -17,10 +17,13 @@ public class TerraformIndexData extends SavedData {
     private static final String WATER_LEVEL_KEY = "water_level_y";
     private static final String PROCESSED_CHUNK_KEYS = "processed_chunk_keys";
     private static final String PROCESSED_WATER_LEVELS = "processed_water_levels";
+    private static final String HYDRATION_REVISION_KEY = "hydration_revision";
+    private static final int CURRENT_HYDRATION_REVISION = 2;
 
     private long terraformIndex;
     private int waterLevelY = -64;
     private final Long2IntMap processedWaterLevels = new Long2IntOpenHashMap();
+    private int hydrationRevision = CURRENT_HYDRATION_REVISION;
 
     private TerraformIndexData() {
         this(0L);
@@ -36,12 +39,14 @@ public class TerraformIndexData extends SavedData {
         if (tag.contains(WATER_LEVEL_KEY)) {
             data.waterLevelY = tag.getInt(WATER_LEVEL_KEY);
         }
+        data.hydrationRevision = tag.getInt(HYDRATION_REVISION_KEY);
         long[] processedChunkKeys = tag.getLongArray(PROCESSED_CHUNK_KEYS);
         int[] processedLevels = tag.getIntArray(PROCESSED_WATER_LEVELS);
         int count = Math.min(processedChunkKeys.length, processedLevels.length);
         for (int i = 0; i < count; i++) {
             data.processedWaterLevels.put(processedChunkKeys[i], processedLevels[i]);
         }
+        data.ensureHydrationRevision();
         return data;
     }
 
@@ -49,6 +54,7 @@ public class TerraformIndexData extends SavedData {
     public CompoundTag save(CompoundTag tag, HolderLookup.Provider provider) {
         tag.putLong(VALUE_KEY, terraformIndex);
         tag.putInt(WATER_LEVEL_KEY, waterLevelY);
+        tag.putInt(HYDRATION_REVISION_KEY, hydrationRevision);
         long[] keys = new long[processedWaterLevels.size()];
         int[] values = new int[keys.length];
         int index = 0;
@@ -81,6 +87,14 @@ public class TerraformIndexData extends SavedData {
         if (this.waterLevelY != waterLevelY) {
             this.waterLevelY = waterLevelY;
             this.processedWaterLevels.clear();
+            setDirty();
+        }
+    }
+
+    public void ensureHydrationRevision() {
+        if (hydrationRevision != CURRENT_HYDRATION_REVISION) {
+            hydrationRevision = CURRENT_HYDRATION_REVISION;
+            processedWaterLevels.clear();
             setDirty();
         }
     }

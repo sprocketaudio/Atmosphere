@@ -113,7 +113,7 @@ public final class TerraformWaterSystem {
                 int surfaceY = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, localX, localZ);
                 int topY = level.getMaxBuildHeight() - 1;
 
-                for (int y = topY; y > surfaceY; y--) {
+                for (int y = topY; y >= surfaceY; y--) {
                     cursor.set(worldX, y, worldZ);
                     BlockState state = chunk.getBlockState(cursor);
                     var fluidState = state.getFluidState();
