@@ -54,25 +54,12 @@ public class TerraformIndexEvents {
             return;
         }
 
-        // Prevent duplicate scheduling while this chunk is being processed.
+        long startNanos = System.nanoTime();
+        int removed = clearWaterFromChunk(serverLevel, levelChunk);
+        long durationMs = (System.nanoTime() - startNanos) / 1_000_000L;
+
         data.markChunkProcessed(chunkKey);
-        Atmosphere.LOGGER.debug("Queueing water strip for chunk {}", chunkPos);
-
-        if (!serverLevel.hasChunk(chunkPos.x, chunkPos.z)) {
-            return;
-        }
-
-        serverLevel.getServer().execute(() -> {
-            if (!serverLevel.hasChunk(chunkPos.x, chunkPos.z)) {
-                return;
-            }
-
-            long startNanos = System.nanoTime();
-            LevelChunk liveChunk = serverLevel.getChunk(chunkPos.x, chunkPos.z);
-            int removed = clearWaterFromChunk(serverLevel, liveChunk);
-            long durationMs = (System.nanoTime() - startNanos) / 1_000_000L;
-            Atmosphere.LOGGER.info("Stripped {} water blocks from chunk {} in {} ms", removed, chunkPos, durationMs);
-        });
+        Atmosphere.LOGGER.info("Stripped {} water blocks from chunk {} in {} ms", removed, chunkPos, durationMs);
     }
 
     public static void onWaterPlaced(BlockEvent.EntityPlaceEvent event) {
