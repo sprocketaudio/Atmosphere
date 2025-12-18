@@ -3,15 +3,20 @@ package net.sprocketgames.atmosphere.client;
 import net.minecraft.client.Minecraft;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.client.event.RenderGuiEvent;
+import net.neoforged.neoforge.common.NeoForge;
 import net.sprocketgames.atmosphere.Atmosphere;
 
-@EventBusSubscriber(modid = Atmosphere.MOD_ID, value = Dist.CLIENT, bus = EventBusSubscriber.Bus.FORGE)
+@Mod(value = Atmosphere.MOD_ID, dist = Dist.CLIENT)
 public class AtmosphereClient {
+    public AtmosphereClient() {
+        NeoForge.EVENT_BUS.addListener(this::renderTerraformIndex);
+    }
+
     @SubscribeEvent
     // Render the Terraform Index in the HUD using the latest value received from the server.
-    public static void renderTerraformIndex(RenderGuiEvent.Post event) {
+    public void renderTerraformIndex(RenderGuiEvent.Post event) {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.level == null || minecraft.player == null) {
             return;

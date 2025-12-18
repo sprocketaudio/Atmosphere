@@ -1,6 +1,10 @@
 package net.sprocketgames.atmosphere.data;
 
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongSet;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.LongArrayTag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.saveddata.SavedData;
 import net.sprocketgames.atmosphere.Atmosphere;
@@ -11,8 +15,10 @@ import net.sprocketgames.atmosphere.Atmosphere;
 public class TerraformIndexData extends SavedData {
     private static final String DATA_NAME = Atmosphere.MOD_ID + "_terraform_index";
     private static final String VALUE_KEY = "terraform_index";
+    private static final String PROCESSED_CHUNKS_KEY = "processed_chunks";
 
     private long terraformIndex;
+    private final LongSet processedChunks = new LongOpenHashSet();
 
     private TerraformIndexData() {
         this(0L);
@@ -22,13 +28,18 @@ public class TerraformIndexData extends SavedData {
         this.terraformIndex = terraformIndex;
     }
 
-    public static TerraformIndexData load(CompoundTag tag) {
-        return new TerraformIndexData(tag.getLong(VALUE_KEY));
+    public static TerraformIndexData load(CompoundTag tag, HolderLookup.Provider provider) {
+        TerraformIndexData data = new TerraformIndexData(tag.getLong(VALUE_KEY));
+        for (long chunkKey : tag.getLongArray(PROCESSED_CHUNKS_KEY)) {
+            data.processedChunks.add(chunkKey);
+        }
+        return data;
     }
 
     @Override
-    public CompoundTag save(CompoundTag tag) {
+    public CompoundTag save(CompoundTag tag, HolderLookup.Provider provider) {
         tag.putLong(VALUE_KEY, terraformIndex);
+        tag.put(PROCESSED_CHUNKS_KEY, new LongArrayTag(processedChunks.toLongArray()));
         return tag;
     }
 
@@ -39,6 +50,16 @@ public class TerraformIndexData extends SavedData {
     public void setTerraformIndex(long terraformIndex) {
         if (this.terraformIndex != terraformIndex) {
             this.terraformIndex = terraformIndex;
+            setDirty();
+        }
+    }
+
+    public boolean isChunkProcessed(long chunkKey) {
+        return processedChunks.contains(chunkKey);
+    }
+
+    public void markChunkProcessed(long chunkKey) {
+        if (processedChunks.add(chunkKey)) {
             setDirty();
         }
     }

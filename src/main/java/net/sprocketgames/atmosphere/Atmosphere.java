@@ -8,6 +8,8 @@ import net.minecraft.resources.ResourceLocation;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.neoforged.neoforge.common.NeoForge;
+import net.sprocketgames.atmosphere.events.TerraformIndexEvents;
 import net.sprocketgames.atmosphere.data.TerraformIndexData;
 import net.sprocketgames.atmosphere.network.AtmosphereNetwork;
 
@@ -19,12 +21,17 @@ public class Atmosphere {
 
     public Atmosphere(IEventBus modEventBus) {
         modEventBus.addListener(this::onCommonSetup);
+        modEventBus.addListener(AtmosphereNetwork::register);
+
+        // Gameplay listeners live on the NeoForge event bus.
+        NeoForge.EVENT_BUS.addListener(TerraformIndexEvents::onPlayerLogin);
+        NeoForge.EVENT_BUS.addListener(TerraformIndexEvents::onChunkLoad);
+        NeoForge.EVENT_BUS.addListener(TerraformIndexEvents::onWaterPlaced);
     }
 
     private void onCommonSetup(FMLCommonSetupEvent event) {
         // Register networking and ensure the Terraform Index saved data is ready to use.
         event.enqueueWork(() -> {
-            AtmosphereNetwork.register();
             TerraformIndexData.bootstrap();
         });
     }
