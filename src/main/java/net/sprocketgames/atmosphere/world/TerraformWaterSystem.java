@@ -107,13 +107,17 @@ public final class TerraformWaterSystem {
                 int localZ = (column >>> 4) & 15;
                 int worldX = chunk.getPos().getMinBlockX() + localX;
                 int worldZ = chunk.getPos().getMinBlockZ() + localZ;
-                int skyFloor = Math.max(minY, chunk.getHeight(Heightmap.Types.MOTION_BLOCKING, localX, localZ));
-                int topY = Math.min(level.getMaxBuildHeight() - 1, Math.max(waterLevel, skyFloor));
+                int topY = Math.min(level.getMaxBuildHeight() - 1,
+                        Math.max(waterLevel, chunk.getHeight(Heightmap.Types.WORLD_SURFACE, localX, localZ)));
 
                 int placed = 0;
                 int removed = 0;
-                for (int y = topY; y >= skyFloor; y--) {
+                for (int y = topY; y >= minY; y--) {
                     cursor.set(worldX, y, worldZ);
+                    if (!level.canSeeSkyFromBelowWater(cursor)) {
+                        break;
+                    }
+
                     BlockState state = chunk.getBlockState(cursor);
                     boolean isWater = state.getFluidState().is(FluidTags.WATER);
 
