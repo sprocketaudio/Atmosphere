@@ -55,7 +55,7 @@ public class TerraformIndexEvents {
         }
 
         long startNanos = System.nanoTime();
-        int removed = clearWaterFromChunk(levelChunk);
+        int removed = clearWaterFromChunk(serverLevel, levelChunk);
         long durationMs = (System.nanoTime() - startNanos) / 1_000_000L;
 
         data.markChunkProcessed(chunkKey);
@@ -87,13 +87,12 @@ public class TerraformIndexEvents {
         }
     }
 
-    private static int clearWaterFromChunk(LevelChunk chunk) {
+    private static int clearWaterFromChunk(ServerLevel level, LevelChunk chunk) {
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         int chunkMinX = chunk.getPos().getMinBlockX();
         int chunkMinZ = chunk.getPos().getMinBlockZ();
         int removed = 0;
         BlockState air = Blocks.AIR.defaultBlockState();
-        boolean mutated = false;
 
         LevelChunkSection[] sections = chunk.getSections();
         for (int sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
@@ -115,16 +114,11 @@ public class TerraformIndexEvents {
                         }
 
                         cursor.set(chunkMinX + x, sectionMinY + y, chunkMinZ + z);
-                        states.set(x, y, z, air);
-                        mutated = true;
+                        chunk.setBlockState(cursor, air, false);
                         removed++;
                     }
                 }
             }
-        }
-
-        if (mutated) {
-            chunk.setUnsaved(true);
         }
 
         return removed;
