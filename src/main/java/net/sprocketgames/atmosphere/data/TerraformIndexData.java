@@ -1,5 +1,7 @@
 package net.sprocketgames.atmosphere.data;
 
+import it.unimi.dsi.fastutil.longs.Long2IntMap;
+import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
@@ -13,9 +15,12 @@ public class TerraformIndexData extends SavedData {
     private static final String DATA_NAME = Atmosphere.MOD_ID + "_terraform_index";
     private static final String VALUE_KEY = "terraform_index";
     private static final String WATER_LEVEL_KEY = "water_level_y";
+    private static final String PROCESSED_CHUNK_KEYS = "processed_chunk_keys";
+    private static final String PROCESSED_WATER_LEVELS = "processed_water_levels";
 
     private long terraformIndex;
     private int waterLevelY = -64;
+    private final Long2IntMap processedWaterLevels = new Long2IntOpenHashMap();
 
     private TerraformIndexData() {
         this(0L);
@@ -23,12 +28,19 @@ public class TerraformIndexData extends SavedData {
 
     private TerraformIndexData(long terraformIndex) {
         this.terraformIndex = terraformIndex;
+        this.processedWaterLevels.defaultReturnValue(Integer.MIN_VALUE);
     }
 
     public static TerraformIndexData load(CompoundTag tag, HolderLookup.Provider provider) {
         TerraformIndexData data = new TerraformIndexData(tag.getLong(VALUE_KEY));
         if (tag.contains(WATER_LEVEL_KEY)) {
             data.waterLevelY = tag.getInt(WATER_LEVEL_KEY);
+        }
+        long[] processedChunkKeys = tag.getLongArray(PROCESSED_CHUNK_KEYS);
+        int[] processedLevels = tag.getIntArray(PROCESSED_WATER_LEVELS);
+        int count = Math.min(processedChunkKeys.length, processedLevels.length);
+        for (int i = 0; i < count; i++) {
+            data.processedWaterLevels.put(processedChunkKeys[i], processedLevels[i]);
         }
         return data;
     }
@@ -37,6 +49,16 @@ public class TerraformIndexData extends SavedData {
     public CompoundTag save(CompoundTag tag, HolderLookup.Provider provider) {
         tag.putLong(VALUE_KEY, terraformIndex);
         tag.putInt(WATER_LEVEL_KEY, waterLevelY);
+        long[] keys = new long[processedWaterLevels.size()];
+        int[] values = new int[keys.length];
+        int index = 0;
+        for (Long2IntMap.Entry entry : processedWaterLevels.long2IntEntrySet()) {
+            keys[index] = entry.getLongKey();
+            values[index] = entry.getIntValue();
+            index++;
+        }
+        tag.putLongArray(PROCESSED_CHUNK_KEYS, keys);
+        tag.putIntArray(PROCESSED_WATER_LEVELS, values);
         return tag;
     }
 
@@ -58,16 +80,20 @@ public class TerraformIndexData extends SavedData {
     public void setWaterLevelY(int waterLevelY) {
         if (this.waterLevelY != waterLevelY) {
             this.waterLevelY = waterLevelY;
+            this.processedWaterLevels.clear();
             setDirty();
         }
     }
 
-    public boolean isChunkProcessed(long chunkKey) {
-        return false;
+    public boolean isChunkProcessed(long chunkKey, int waterLevel) {
+        return processedWaterLevels.get(chunkKey) == waterLevel;
     }
 
-    public void markChunkProcessed(long chunkKey) {
-        // No-op placeholder to preserve API shape while chunk bookkeeping is unused.
+    public void markChunkProcessed(long chunkKey, int waterLevel) {
+        int previous = processedWaterLevels.put(chunkKey, waterLevel);
+        if (previous != waterLevel) {
+            setDirty();
+        }
     }
 
     /**

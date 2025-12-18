@@ -10,6 +10,7 @@ import it.unimi.dsi.fastutil.longs.LongLinkedOpenHashSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.tags.FluidTags;
@@ -27,6 +28,7 @@ import net.sprocketgames.atmosphere.data.TerraformIndexData;
  */
 public final class TerraformWaterSystem {
     private static final int MAX_CHUNKS_PER_TICK = 2;
+    private static final int PLAYER_PRIORITY_RADIUS = 2;
 
     private static final Map<ResourceKey<Level>, ChunkQueue> QUEUES = new HashMap<>();
     private static final boolean LOG_CHUNK_UPDATES = true;
@@ -48,7 +50,12 @@ public final class TerraformWaterSystem {
 
     public static void enqueue(ServerLevel level, ChunkPos pos) {
         ChunkQueue queue = queueFor(level);
-        queue.trackLoaded(pos.toLong());
+        TerraformIndexData data = TerraformIndexData.get(level);
+        int waterLevel = data.getWaterLevelY();
+        long chunkKey = pos.toLong();
+        if (!data.isChunkProcessed(chunkKey, waterLevel)) {
+            queue.trackLoaded(chunkKey);
+        }
     }
 
     public static void unload(ServerLevel level, ChunkPos pos) {
@@ -67,6 +74,11 @@ public final class TerraformWaterSystem {
 
     private static void processQueue(ServerLevel level) {
         ChunkQueue queue = queueFor(level);
+        TerraformIndexData data = TerraformIndexData.get(level);
+        int waterLevel = data.getWaterLevelY();
+
+        prioritizePlayerChunks(level, queue, data, waterLevel);
+
         if (queue.isEmpty()) {
             return;
         }
@@ -75,7 +87,6 @@ public final class TerraformWaterSystem {
         BlockState water = Blocks.WATER.defaultBlockState();
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         int processedChunks = 0;
-        int waterLevel = TerraformIndexData.get(level).getWaterLevelY();
 
         while (!queue.isEmpty() && processedChunks < MAX_CHUNKS_PER_TICK) {
             long chunkKey = queue.pop();
@@ -135,8 +146,25 @@ public final class TerraformWaterSystem {
                 Atmosphere.LOGGER.debug("Terraform water @ chunk ({}, {}), placed {}, removed {}", chunk.getPos().x, chunk.getPos().z, placed, removed);
             }
 
+            data.markChunkProcessed(chunkKey, waterLevel);
             queue.finish(chunkKey);
             processedChunks++;
+        }
+    }
+
+    private static void prioritizePlayerChunks(ServerLevel level, ChunkQueue queue, TerraformIndexData data, int waterLevel) {
+        for (ServerPlayer player : level.players()) {
+            ChunkPos playerChunk = player.chunkPosition();
+            for (int dx = -PLAYER_PRIORITY_RADIUS; dx <= PLAYER_PRIORITY_RADIUS; dx++) {
+                for (int dz = -PLAYER_PRIORITY_RADIUS; dz <= PLAYER_PRIORITY_RADIUS; dz++) {
+                    ChunkPos nearby = new ChunkPos(playerChunk.x + dx, playerChunk.z + dz);
+                    long chunkKey = nearby.toLong();
+                    if (!data.isChunkProcessed(chunkKey, waterLevel)) {
+                        queue.trackLoaded(chunkKey);
+                        queue.prioritize(chunkKey);
+                    }
+                }
+            }
         }
     }
 
@@ -184,6 +212,13 @@ public final class TerraformWaterSystem {
 
         ChunkWork peek(long chunkKey) {
             return tasks.get(chunkKey);
+        }
+
+        void prioritize(long chunkKey) {
+            if (tasks.containsKey(chunkKey)) {
+                order.remove(chunkKey);
+                order.addFirst(chunkKey);
+            }
         }
 
         void pushBack(long chunkKey) {
