@@ -104,25 +104,25 @@ public final class TerraformWaterSystem {
                 int localZ = (column >>> 4) & 15;
                 int worldX = chunk.getPos().getMinBlockX() + localX;
                 int worldZ = chunk.getPos().getMinBlockZ() + localZ;
-                int startY = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, localX, localZ);
-                boolean skyClear = true;
+                int columnTop = chunk.getHeight(Heightmap.Types.MOTION_BLOCKING, localX, localZ);
+                int topY = Math.min(level.getMaxBuildHeight() - 1, Math.max(waterLevel, columnTop));
 
-                for (int y = startY; y >= minY; y--) {
+                for (int y = topY; y >= minY; y--) {
                     cursor.set(worldX, y, worldZ);
-                    if (skyClear && !level.canSeeSkyFromBelowWater(cursor)) {
-                        skyClear = false;
+                    boolean skyVisible = level.canSeeSkyFromBelowWater(cursor);
+
+                    if (!skyVisible && y < waterLevel) {
+                        // We have hit solid terrain that blocks the sky, so deeper positions cannot fill.
+                        break;
                     }
 
+                    boolean waterAllowed = skyVisible && y <= waterLevel;
                     BlockState state = chunk.getBlockState(cursor);
-                    boolean waterAllowed = skyClear && y <= waterLevel;
-                    boolean isWater = state.getFluidState().isSourceOfType(net.minecraft.world.level.material.Fluids.WATER);
+                    boolean isWater = state.getFluidState().is(FluidTags.WATER);
 
                     if (isWater && !waterAllowed) {
                         chunk.setBlockState(cursor, air, false);
-                        continue;
-                    }
-
-                    if (waterAllowed && state.isAir()) {
+                    } else if (waterAllowed && (state.isAir() || state.getFluidState().isEmpty())) {
                         chunk.setBlockState(cursor, water, false);
                     }
                 }

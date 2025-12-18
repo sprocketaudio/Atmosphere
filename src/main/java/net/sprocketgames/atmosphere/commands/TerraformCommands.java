@@ -20,8 +20,8 @@ public final class TerraformCommands {
         dispatcher.register(Commands.literal("terraform")
                 .requires(source -> source.hasPermission(2))
                 .then(Commands.literal("get").executes(context -> {
-                    ServerLevel level = context.getSource().getLevel();
-                    TerraformIndexData data = TerraformIndexData.get(level);
+                    ServerLevel overworld = context.getSource().getServer().overworld();
+                    TerraformIndexData data = TerraformIndexData.get(overworld);
                     long terraformIndex = data.getTerraformIndex();
                     int waterLevelY = data.getWaterLevelY();
                     context.getSource().sendSuccess(
@@ -32,10 +32,10 @@ public final class TerraformCommands {
                         .then(Commands.argument("y", IntegerArgumentType.integer(-64, 320))
                                 .executes(context -> {
                                     int y = IntegerArgumentType.getInteger(context, "y");
-                                    ServerLevel level = context.getSource().getLevel();
-                                    TerraformIndexData data = TerraformIndexData.get(level);
+                                    ServerLevel overworld = context.getSource().getServer().overworld();
+                                    TerraformIndexData data = TerraformIndexData.get(overworld);
                                     data.setWaterLevelY(y);
-                                    TerraformWaterSystem.requeueLoaded(level);
+                                    TerraformWaterSystem.requeueLoaded(overworld);
                                     context.getSource().sendSuccess(
                                             () -> Component.literal("Set waterLevelY to " + y), true);
                                     return 1;

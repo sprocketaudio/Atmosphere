@@ -29,7 +29,6 @@ public class Atmosphere {
         NeoForge.EVENT_BUS.addListener(TerraformIndexEvents::onPlayerLogin);
         NeoForge.EVENT_BUS.addListener(TerraformIndexEvents::onChunkLoad);
         NeoForge.EVENT_BUS.addListener(TerraformIndexEvents::onChunkUnload);
-        NeoForge.EVENT_BUS.addListener(TerraformIndexEvents::onWaterPlaced);
         NeoForge.EVENT_BUS.addListener(TerraformCommands::register);
         NeoForge.EVENT_BUS.addListener(TerraformWaterSystem::onLevelTick);
     }
