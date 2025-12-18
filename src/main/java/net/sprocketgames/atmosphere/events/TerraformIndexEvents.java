@@ -1,18 +1,22 @@
 package net.sprocketgames.atmosphere.events;
 
+import java.util.concurrent.ConcurrentLinkedQueue;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
-import net.minecraft.world.level.ChunkPos;
 import net.minecraft.tags.FluidTags;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.chunk.ChunkStatus;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.neoforged.neoforge.event.TickEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
@@ -22,6 +26,7 @@ import net.sprocketgames.atmosphere.network.AtmosphereNetwork;
 
 public class TerraformIndexEvents {
     private static final long WATER_PLACE_THRESHOLD = 1_000_000L;
+    private static final ConcurrentLinkedQueue<ChunkPos> WATER_STRIP_QUEUE = new ConcurrentLinkedQueue<>();
 
     public static void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) {
@@ -54,12 +59,45 @@ public class TerraformIndexEvents {
             return;
         }
 
-        long startNanos = System.nanoTime();
-        int removed = clearWaterFromChunk(serverLevel, levelChunk);
-        long durationMs = (System.nanoTime() - startNanos) / 1_000_000L;
-
+        // Avoid blocking chunk load; queue the chunk for later stripping.
+        WATER_STRIP_QUEUE.offer(chunkPos);
         data.markChunkProcessed(chunkKey);
-        Atmosphere.LOGGER.info("Stripped {} water blocks from chunk {} in {} ms", removed, chunkPos, durationMs);
+        Atmosphere.LOGGER.debug("Queued water strip for chunk {}", chunkPos);
+    }
+
+    public static void onLevelTick(TickEvent.LevelTickEvent event) {
+        if (event.level.isClientSide() || event.phase != TickEvent.Phase.END) {
+            return;
+        }
+
+        if (!(event.level instanceof ServerLevel serverLevel)) {
+            return;
+        }
+
+        if (serverLevel.dimension() != Level.OVERWORLD) {
+            return;
+        }
+
+        // Process a few queued chunks per tick to avoid long stalls.
+        for (int i = 0; i < 2; i++) {
+            ChunkPos chunkPos = WATER_STRIP_QUEUE.poll();
+            if (chunkPos == null) {
+                break;
+            }
+
+            LevelChunk chunk = serverLevel.getChunkSource().getChunkNow(chunkPos.x, chunkPos.z);
+            if (chunk == null || chunk.getStatus().isOrAfter(ChunkStatus.FULL) == false) {
+                // Requeue if the chunk is still loading.
+                WATER_STRIP_QUEUE.offer(chunkPos);
+                Atmosphere.LOGGER.debug("Re-queued water strip; chunk {} not ready", chunkPos);
+                continue;
+            }
+
+            long startNanos = System.nanoTime();
+            int removed = clearWaterFromChunk(serverLevel, chunk);
+            long durationMs = (System.nanoTime() - startNanos) / 1_000_000L;
+            Atmosphere.LOGGER.info("Stripped {} water blocks from chunk {} in {} ms", removed, chunkPos, durationMs);
+        }
     }
 
     public static void onWaterPlaced(BlockEvent.EntityPlaceEvent event) {
