@@ -156,15 +156,17 @@ public final class TerraformWaterSystem {
                 Atmosphere.LOGGER.debug("Terraform water @ chunk ({}, {}), placed {}, removed {}", chunk.getPos().x, chunk.getPos().z, placed, removed);
             }
 
-            if (hasLoadedUnprocessedNeighbor(queue, data, work.pos, waterLevel)) {
+            boolean hasPendingNeighbor = hasLoadedUnprocessedNeighbor(queue, data, work.pos, waterLevel);
+            data.markChunkProcessed(chunkKey, waterLevel);
+
+            if (hasPendingNeighbor) {
                 work.waitingForNeighbors = true;
                 work.nextColumn = 0;
                 queue.pushBack(chunkKey);
-                continue;
+            } else {
+                queue.finish(chunkKey);
             }
 
-            data.markChunkProcessed(chunkKey, waterLevel);
-            queue.finish(chunkKey);
             processedChunks++;
         }
     }
