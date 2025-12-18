@@ -11,7 +11,9 @@ import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import net.sprocketgames.atmosphere.events.TerraformIndexEvents;
 import net.sprocketgames.atmosphere.data.TerraformIndexData;
+import net.sprocketgames.atmosphere.commands.TerraformCommands;
 import net.sprocketgames.atmosphere.network.AtmosphereNetwork;
+import net.sprocketgames.atmosphere.world.TerraformWaterSystem;
 
 // The value here should match an entry in the META-INF/neoforge.mods.toml file
 @Mod(Atmosphere.MOD_ID)
@@ -26,7 +28,10 @@ public class Atmosphere {
         // Gameplay listeners live on the NeoForge event bus.
         NeoForge.EVENT_BUS.addListener(TerraformIndexEvents::onPlayerLogin);
         NeoForge.EVENT_BUS.addListener(TerraformIndexEvents::onChunkLoad);
+        NeoForge.EVENT_BUS.addListener(TerraformIndexEvents::onChunkUnload);
         NeoForge.EVENT_BUS.addListener(TerraformIndexEvents::onWaterPlaced);
+        NeoForge.EVENT_BUS.addListener(TerraformCommands::register);
+        NeoForge.EVENT_BUS.addListener(TerraformWaterSystem::onLevelTick);
     }
 
     private void onCommonSetup(FMLCommonSetupEvent event) {

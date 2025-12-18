@@ -1,28 +1,20 @@
 package net.sprocketgames.atmosphere.events;
 
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.SectionPos;
-import net.minecraft.tags.FluidTags;
-import net.minecraft.world.level.ChunkPos;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.chunk.LevelChunk;
-import net.minecraft.world.level.chunk.LevelChunkSection;
-import net.minecraft.world.level.chunk.PalettedContainer;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
-import net.sprocketgames.atmosphere.Atmosphere;
 import net.sprocketgames.atmosphere.data.TerraformIndexData;
 import net.sprocketgames.atmosphere.network.AtmosphereNetwork;
+import net.sprocketgames.atmosphere.world.TerraformWaterSystem;
 
 public class TerraformIndexEvents {
-    private static final long WATER_PLACE_THRESHOLD = 1_000_000L;
-
     public static void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) {
             return;
@@ -47,19 +39,23 @@ public class TerraformIndexEvents {
             return;
         }
 
-        ChunkPos chunkPos = levelChunk.getPos();
-        long chunkKey = chunkPos.toLong();
-        TerraformIndexData data = TerraformIndexData.get(serverLevel);
-        if (data.isChunkProcessed(chunkKey)) {
+        TerraformWaterSystem.enqueue(serverLevel, levelChunk.getPos());
+    }
+
+    public static void onChunkUnload(ChunkEvent.Unload event) {
+        if (!(event.getLevel() instanceof ServerLevel serverLevel)) {
             return;
         }
 
-        long startNanos = System.nanoTime();
-        int removed = clearWaterFromChunk(serverLevel, levelChunk);
-        long durationMs = (System.nanoTime() - startNanos) / 1_000_000L;
+        if (serverLevel.dimension() != Level.OVERWORLD) {
+            return;
+        }
 
-        data.markChunkProcessed(chunkKey);
-        Atmosphere.LOGGER.info("Stripped {} water blocks from chunk {} in {} ms (load-time)", removed, chunkPos, durationMs);
+        if (!(event.getChunk() instanceof LevelChunk levelChunk)) {
+            return;
+        }
+
+        TerraformWaterSystem.unload(serverLevel, levelChunk.getPos());
     }
 
     public static void onWaterPlaced(BlockEvent.EntityPlaceEvent event) {
@@ -80,47 +76,10 @@ public class TerraformIndexEvents {
             return;
         }
 
-        long terraformIndex = TerraformIndexData.get(serverLevel).getTerraformIndex();
-        if (terraformIndex < WATER_PLACE_THRESHOLD) {
-            // Player water placement is blocked until the Terraform Index reaches the threshold.
-            serverLevel.setBlock(event.getPos(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        TerraformIndexData data = TerraformIndexData.get(serverLevel);
+        if (event.getPos().getY() > data.getWaterLevelY()) {
+            // Player water placement is blocked above the current water level.
+            serverLevel.setBlock(event.getPos(), Blocks.AIR.defaultBlockState(), net.minecraft.world.level.block.Block.UPDATE_ALL);
         }
-    }
-
-    private static int clearWaterFromChunk(ServerLevel level, LevelChunk chunk) {
-        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
-        int chunkMinX = chunk.getPos().getMinBlockX();
-        int chunkMinZ = chunk.getPos().getMinBlockZ();
-        int removed = 0;
-        BlockState air = Blocks.AIR.defaultBlockState();
-
-        LevelChunkSection[] sections = chunk.getSections();
-        for (int sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
-            LevelChunkSection section = sections[sectionIndex];
-            if (section == null || section.hasOnlyAir()) {
-                continue;
-            }
-
-            PalettedContainer<BlockState> states = section.getStates();
-            int sectionY = chunk.getSectionYFromSectionIndex(sectionIndex);
-            int sectionMinY = SectionPos.sectionToBlockCoord(sectionY);
-
-            for (int y = 0; y < 16; y++) {
-                for (int z = 0; z < 16; z++) {
-                    for (int x = 0; x < 16; x++) {
-                        BlockState state = states.get(x, y, z);
-                        if (!state.getFluidState().is(FluidTags.WATER)) {
-                            continue;
-                        }
-
-                        cursor.set(chunkMinX + x, sectionMinY + y, chunkMinZ + z);
-                        chunk.setBlockState(cursor, air, false);
-                        removed++;
-                    }
-                }
-            }
-        }
-
-        return removed;
     }
 }

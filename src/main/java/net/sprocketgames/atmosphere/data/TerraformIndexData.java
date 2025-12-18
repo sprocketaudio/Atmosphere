@@ -15,9 +15,11 @@ import net.sprocketgames.atmosphere.Atmosphere;
 public class TerraformIndexData extends SavedData {
     private static final String DATA_NAME = Atmosphere.MOD_ID + "_terraform_index";
     private static final String VALUE_KEY = "terraform_index";
+    private static final String WATER_LEVEL_KEY = "water_level_y";
     private static final String PROCESSED_CHUNKS_KEY = "processed_chunks";
 
     private long terraformIndex;
+    private int waterLevelY = -64;
     private final LongSet processedChunks = new LongOpenHashSet();
 
     private TerraformIndexData() {
@@ -30,6 +32,9 @@ public class TerraformIndexData extends SavedData {
 
     public static TerraformIndexData load(CompoundTag tag, HolderLookup.Provider provider) {
         TerraformIndexData data = new TerraformIndexData(tag.getLong(VALUE_KEY));
+        if (tag.contains(WATER_LEVEL_KEY)) {
+            data.waterLevelY = tag.getInt(WATER_LEVEL_KEY);
+        }
         for (long chunkKey : tag.getLongArray(PROCESSED_CHUNKS_KEY)) {
             data.processedChunks.add(chunkKey);
         }
@@ -39,6 +44,7 @@ public class TerraformIndexData extends SavedData {
     @Override
     public CompoundTag save(CompoundTag tag, HolderLookup.Provider provider) {
         tag.putLong(VALUE_KEY, terraformIndex);
+        tag.putInt(WATER_LEVEL_KEY, waterLevelY);
         tag.put(PROCESSED_CHUNKS_KEY, new LongArrayTag(processedChunks.toLongArray()));
         return tag;
     }
@@ -50,6 +56,17 @@ public class TerraformIndexData extends SavedData {
     public void setTerraformIndex(long terraformIndex) {
         if (this.terraformIndex != terraformIndex) {
             this.terraformIndex = terraformIndex;
+            setDirty();
+        }
+    }
+
+    public int getWaterLevelY() {
+        return waterLevelY;
+    }
+
+    public void setWaterLevelY(int waterLevelY) {
+        if (this.waterLevelY != waterLevelY) {
+            this.waterLevelY = waterLevelY;
             setDirty();
         }
     }
