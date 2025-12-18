@@ -22,8 +22,6 @@ import net.sprocketgames.atmosphere.network.AtmosphereNetwork;
 
 public class TerraformIndexEvents {
     private static final long WATER_PLACE_THRESHOLD = 1_000_000L;
-    private static final java.util.concurrent.ConcurrentLinkedQueue<StripRequest> WATER_STRIP_QUEUE = new java.util.concurrent.ConcurrentLinkedQueue<>();
-    private static volatile boolean drainScheduled = false;
 
     public static void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) {
@@ -56,54 +54,12 @@ public class TerraformIndexEvents {
             return;
         }
 
-        // Avoid blocking chunk load; queue the chunk for later stripping.
-        WATER_STRIP_QUEUE.offer(new StripRequest(serverLevel, chunkPos));
-        scheduleDrain(serverLevel);
+        long startNanos = System.nanoTime();
+        int removed = clearWaterFromChunk(serverLevel, levelChunk);
+        long durationMs = (System.nanoTime() - startNanos) / 1_000_000L;
+
         data.markChunkProcessed(chunkKey);
-        Atmosphere.LOGGER.debug("Queued water strip for chunk {}", chunkPos);
-    }
-
-    private static void scheduleDrain(ServerLevel level) {
-        if (drainScheduled) {
-            return;
-        }
-        drainScheduled = true;
-        level.getServer().execute(TerraformIndexEvents::drainQueue);
-    }
-
-    private static void drainQueue() {
-        int processed = 0;
-        StripRequest request;
-        while ((request = WATER_STRIP_QUEUE.poll()) != null && processed < 4) {
-            ServerLevel level = request.level;
-            if (level.dimension() != Level.OVERWORLD) {
-                continue;
-            }
-
-            LevelChunk chunk = level.getChunkSource().getChunkNow(request.pos.x, request.pos.z);
-            if (chunk == null) {
-                // Requeue if the chunk is still loading.
-                WATER_STRIP_QUEUE.offer(request);
-                continue;
-            }
-
-            long startNanos = System.nanoTime();
-            int removed = clearWaterFromChunk(level, chunk);
-            long durationMs = (System.nanoTime() - startNanos) / 1_000_000L;
-            Atmosphere.LOGGER.info("Stripped {} water blocks from chunk {} in {} ms", removed, request.pos, durationMs);
-            processed++;
-        }
-
-        if (!WATER_STRIP_QUEUE.isEmpty()) {
-            // Schedule another batch on the server thread.
-            StripRequest peek = WATER_STRIP_QUEUE.peek();
-            if (peek != null) {
-                peek.level.getServer().execute(TerraformIndexEvents::drainQueue);
-                return;
-            }
-        }
-
-        drainScheduled = false;
+        Atmosphere.LOGGER.info("Stripped {} water blocks from chunk {} in {} ms (load-time)", removed, chunkPos, durationMs);
     }
 
     public static void onWaterPlaced(BlockEvent.EntityPlaceEvent event) {
@@ -166,6 +122,4 @@ public class TerraformIndexEvents {
 
         return removed;
     }
-
-    private record StripRequest(ServerLevel level, ChunkPos pos) {}
 }
