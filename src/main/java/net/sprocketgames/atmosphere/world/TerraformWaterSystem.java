@@ -119,14 +119,15 @@ public final class TerraformWaterSystem {
                         continue;
                     }
 
-                    if (!state.isAir() && !state.getFluidState().isEmpty()) {
-                        break;
+                    if (!state.isAir()) {
+                        if (!state.getFluidState().is(FluidTags.WATER)) {
+                            break;
+                        }
+                        continue;
                     }
 
-                    if (state.isAir()) {
-                        level.setBlock(cursor, water, Block.UPDATE_ALL);
-                        placed++;
-                    }
+                    level.setBlock(cursor, water, Block.UPDATE_ALL);
+                    placed++;
                 }
             }
 
