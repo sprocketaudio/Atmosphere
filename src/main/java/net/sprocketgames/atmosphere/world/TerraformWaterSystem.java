@@ -116,7 +116,9 @@ public final class TerraformWaterSystem {
                 for (int y = topY; y > surfaceY; y--) {
                     cursor.set(worldX, y, worldZ);
                     BlockState state = chunk.getBlockState(cursor);
-                    boolean isWater = state.getFluidState().is(FluidTags.WATER);
+                    var fluidState = state.getFluidState();
+                    boolean isWater = fluidState.is(FluidTags.WATER);
+                    boolean isSourceWater = isWater && fluidState.isSource();
 
                     if (y > waterLevel) {
                         if (isWater) {
@@ -127,6 +129,10 @@ public final class TerraformWaterSystem {
                     }
 
                     if (isWater) {
+                        if (!isSourceWater) {
+                            level.setBlock(cursor, water, Block.UPDATE_ALL);
+                            placed++;
+                        }
                         continue;
                     }
 
