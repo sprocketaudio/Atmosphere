@@ -1,10 +1,7 @@
 package net.sprocketgames.atmosphere.data;
 
-import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
-import it.unimi.dsi.fastutil.longs.LongSet;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.LongArrayTag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.saveddata.SavedData;
 import net.sprocketgames.atmosphere.Atmosphere;
@@ -15,10 +12,10 @@ import net.sprocketgames.atmosphere.Atmosphere;
 public class TerraformIndexData extends SavedData {
     private static final String DATA_NAME = Atmosphere.MOD_ID + "_terraform_index";
     private static final String VALUE_KEY = "terraform_index";
-    private static final String PROCESSED_CHUNKS_KEY = "processed_chunks";
+    private static final String WATER_LEVEL_KEY = "water_level_y";
 
     private long terraformIndex;
-    private final LongSet processedChunks = new LongOpenHashSet();
+    private int waterLevelY = -64;
 
     private TerraformIndexData() {
         this(0L);
@@ -30,8 +27,8 @@ public class TerraformIndexData extends SavedData {
 
     public static TerraformIndexData load(CompoundTag tag, HolderLookup.Provider provider) {
         TerraformIndexData data = new TerraformIndexData(tag.getLong(VALUE_KEY));
-        for (long chunkKey : tag.getLongArray(PROCESSED_CHUNKS_KEY)) {
-            data.processedChunks.add(chunkKey);
+        if (tag.contains(WATER_LEVEL_KEY)) {
+            data.waterLevelY = tag.getInt(WATER_LEVEL_KEY);
         }
         return data;
     }
@@ -39,7 +36,7 @@ public class TerraformIndexData extends SavedData {
     @Override
     public CompoundTag save(CompoundTag tag, HolderLookup.Provider provider) {
         tag.putLong(VALUE_KEY, terraformIndex);
-        tag.put(PROCESSED_CHUNKS_KEY, new LongArrayTag(processedChunks.toLongArray()));
+        tag.putInt(WATER_LEVEL_KEY, waterLevelY);
         return tag;
     }
 
@@ -54,14 +51,23 @@ public class TerraformIndexData extends SavedData {
         }
     }
 
+    public int getWaterLevelY() {
+        return waterLevelY;
+    }
+
+    public void setWaterLevelY(int waterLevelY) {
+        if (this.waterLevelY != waterLevelY) {
+            this.waterLevelY = waterLevelY;
+            setDirty();
+        }
+    }
+
     public boolean isChunkProcessed(long chunkKey) {
-        return processedChunks.contains(chunkKey);
+        return false;
     }
 
     public void markChunkProcessed(long chunkKey) {
-        if (processedChunks.add(chunkKey)) {
-            setDirty();
-        }
+        // No-op placeholder to preserve API shape while chunk bookkeeping is unused.
     }
 
     /**
