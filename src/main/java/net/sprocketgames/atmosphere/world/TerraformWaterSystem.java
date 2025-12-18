@@ -53,9 +53,13 @@ public final class TerraformWaterSystem {
         TerraformIndexData data = TerraformIndexData.get(level);
         int waterLevel = data.getWaterLevelY();
         long chunkKey = pos.toLong();
+
+        queue.markLoaded(chunkKey);
         if (!data.isChunkProcessed(chunkKey, waterLevel)) {
-            queue.trackLoaded(chunkKey);
+            queue.ensureTask(chunkKey);
         }
+
+        scheduleProcessedNeighborsForCleanup(queue, data, waterLevel, pos);
     }
 
     public static void unload(ServerLevel level, ChunkPos pos) {
@@ -188,6 +192,21 @@ public final class TerraformWaterSystem {
         return false;
     }
 
+    private static void scheduleProcessedNeighborsForCleanup(ChunkQueue queue, TerraformIndexData data, int waterLevel, ChunkPos pos) {
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                if (dx == 0 && dz == 0) {
+                    continue;
+                }
+
+                long neighborKey = ChunkPos.asLong(pos.x + dx, pos.z + dz);
+                if (queue.isLoaded(neighborKey) && data.isChunkProcessed(neighborKey, waterLevel) && !queue.hasTask(neighborKey)) {
+                    queue.ensureTask(neighborKey);
+                }
+            }
+        }
+    }
+
     private static void prioritizePlayerChunks(ServerLevel level, ChunkQueue queue, TerraformIndexData data, int waterLevel) {
         for (ServerPlayer player : level.players()) {
             ChunkPos playerChunk = player.chunkPosition();
@@ -196,7 +215,8 @@ public final class TerraformWaterSystem {
                     ChunkPos nearby = new ChunkPos(playerChunk.x + dx, playerChunk.z + dz);
                     long chunkKey = nearby.toLong();
                     if (!data.isChunkProcessed(chunkKey, waterLevel)) {
-                        queue.trackLoaded(chunkKey);
+                        queue.markLoaded(chunkKey);
+                        queue.ensureTask(chunkKey);
                         queue.prioritize(chunkKey);
                     }
                 }
@@ -213,8 +233,11 @@ public final class TerraformWaterSystem {
             return order.isEmpty();
         }
 
-        void trackLoaded(long chunkKey) {
+        void markLoaded(long chunkKey) {
             loaded.add(chunkKey);
+        }
+
+        void ensureTask(long chunkKey) {
             if (!tasks.containsKey(chunkKey)) {
                 tasks.put(chunkKey, new ChunkWork(ChunkPos.getX(chunkKey), ChunkPos.getZ(chunkKey)));
                 order.add(chunkKey);
@@ -236,8 +259,7 @@ public final class TerraformWaterSystem {
             tasks.clear();
             order.clear();
             for (long chunkKey : loaded) {
-                tasks.put(chunkKey, new ChunkWork(ChunkPos.getX(chunkKey), ChunkPos.getZ(chunkKey)));
-                order.add(chunkKey);
+                ensureTask(chunkKey);
             }
         }
 
@@ -263,6 +285,10 @@ public final class TerraformWaterSystem {
 
         boolean isLoaded(long chunkKey) {
             return loaded.contains(chunkKey);
+        }
+
+        boolean hasTask(long chunkKey) {
+            return tasks.containsKey(chunkKey);
         }
     }
 
