@@ -137,9 +137,6 @@ public final class TerraformWaterSystem {
                     }
 
                     if (!state.isAir()) {
-                        if (!state.getFluidState().is(FluidTags.WATER)) {
-                            break;
-                        }
                         continue;
                     }
 
