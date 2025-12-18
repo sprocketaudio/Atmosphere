@@ -19,6 +19,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.neoforged.neoforge.event.tick.LevelTickEvent;
+import net.sprocketgames.atmosphere.Atmosphere;
 import net.sprocketgames.atmosphere.data.TerraformIndexData;
 
 /**
@@ -29,6 +30,7 @@ public final class TerraformWaterSystem {
     private static final int MAX_COLUMNS_PER_TICK = 96;
 
     private static final Map<ResourceKey<Level>, ChunkQueue> QUEUES = new HashMap<>();
+    private static final boolean LOG_CHUNK_UPDATES = true;
 
     private TerraformWaterSystem() {
     }
@@ -105,30 +107,38 @@ public final class TerraformWaterSystem {
                 int localZ = (column >>> 4) & 15;
                 int worldX = chunk.getPos().getMinBlockX() + localX;
                 int worldZ = chunk.getPos().getMinBlockZ() + localZ;
-                int surfaceAirY = chunk.getHeight(Heightmap.Types.MOTION_BLOCKING, localX, localZ);
-                int topY = Math.min(level.getMaxBuildHeight() - 1, Math.max(waterLevel, surfaceAirY));
+            int surfaceAirY = chunk.getHeight(Heightmap.Types.MOTION_BLOCKING, localX, localZ);
+            int topY = Math.min(level.getMaxBuildHeight() - 1, Math.max(waterLevel, surfaceAirY));
 
+                int placed = 0;
+                int removed = 0;
                 for (int y = topY; y >= minY; y--) {
                     cursor.set(worldX, y, worldZ);
-                    boolean skyConnected = y >= surfaceAirY;
+                    boolean skyConnected = level.canSeeSkyFromBelowWater(cursor);
 
                     BlockState state = chunk.getBlockState(cursor);
                     boolean isWater = state.getFluidState().is(FluidTags.WATER);
 
-                    if (isWater && y > waterLevel) {
+                    if (isWater && (!skyConnected || y > waterLevel)) {
                         level.setBlock(cursor, air, Block.UPDATE_ALL);
+                        removed++;
                         continue;
                     }
 
-                    if (!skyConnected && y < waterLevel) {
-                        // Below the first motion-blocking block; nothing deeper can connect to the sky.
+                    if (!skyConnected && y <= waterLevel) {
+                        // Below the sky-lit portion of the column; deeper blocks cannot be sky connected.
                         break;
                     }
 
                     boolean waterAllowed = skyConnected && y <= waterLevel;
                     if (waterAllowed && (state.isAir() || state.getFluidState().isEmpty())) {
                         level.setBlock(cursor, water, Block.UPDATE_ALL);
+                        placed++;
                     }
+                }
+
+                if (LOG_CHUNK_UPDATES && (placed > 0 || removed > 0)) {
+                    Atmosphere.LOGGER.debug("Terraform water @ ({}, {}), column {}, placed {}, removed {}", chunk.getPos().x, chunk.getPos().z, column, placed, removed);
                 }
             }
 
