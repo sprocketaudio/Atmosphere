@@ -27,7 +27,6 @@ import net.sprocketgames.atmosphere.data.TerraformIndexData;
  */
 public final class TerraformWaterSystem {
     private static final int MAX_CHUNKS_PER_TICK = 2;
-    private static final int MAX_COLUMNS_PER_TICK = 96;
 
     private static final Map<ResourceKey<Level>, ChunkQueue> QUEUES = new HashMap<>();
     private static final boolean LOG_CHUNK_UPDATES = true;
@@ -75,12 +74,10 @@ public final class TerraformWaterSystem {
         BlockState air = Blocks.AIR.defaultBlockState();
         BlockState water = Blocks.WATER.defaultBlockState();
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
-        int minY = level.getMinBuildHeight();
         int processedChunks = 0;
-        int processedColumns = 0;
         int waterLevel = TerraformIndexData.get(level).getWaterLevelY();
 
-        while (!queue.isEmpty() && processedChunks < MAX_CHUNKS_PER_TICK && processedColumns < MAX_COLUMNS_PER_TICK) {
+        while (!queue.isEmpty() && processedChunks < MAX_CHUNKS_PER_TICK) {
             long chunkKey = queue.pop();
             ChunkWork work = queue.peek(chunkKey);
             if (work == null) {
@@ -93,57 +90,51 @@ public final class TerraformWaterSystem {
                 continue;
             }
 
-            int columnsLeft = Math.min(MAX_COLUMNS_PER_TICK - processedColumns, 256 - work.nextColumn);
-            if (columnsLeft <= 0) {
-                queue.drop(chunkKey);
-                continue;
-            }
-
-            for (int i = 0; i < columnsLeft; i++) {
-                int column = work.nextColumn++;
-                processedColumns++;
+            int placed = 0;
+            int removed = 0;
+            for (; work.nextColumn < 256; work.nextColumn++) {
+                int column = work.nextColumn;
 
                 int localX = column & 15;
                 int localZ = (column >>> 4) & 15;
                 int worldX = chunk.getPos().getMinBlockX() + localX;
                 int worldZ = chunk.getPos().getMinBlockZ() + localZ;
-                int topY = Math.min(level.getMaxBuildHeight() - 1,
-                        Math.max(waterLevel, chunk.getHeight(Heightmap.Types.WORLD_SURFACE, localX, localZ)));
+                int surfaceY = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, localX, localZ);
+                int topY = level.getMaxBuildHeight() - 1;
 
-                int placed = 0;
-                int removed = 0;
-                for (int y = topY; y >= minY; y--) {
+                for (int y = topY; y > surfaceY; y--) {
                     cursor.set(worldX, y, worldZ);
-                    if (!level.canSeeSkyFromBelowWater(cursor)) {
-                        break;
-                    }
-
                     BlockState state = chunk.getBlockState(cursor);
                     boolean isWater = state.getFluidState().is(FluidTags.WATER);
 
-                    if (isWater && y > waterLevel) {
-                        level.setBlock(cursor, air, Block.UPDATE_ALL);
-                        removed++;
+                    if (y > waterLevel) {
+                        if (isWater) {
+                            level.setBlock(cursor, air, Block.UPDATE_ALL);
+                            removed++;
+                        }
                         continue;
                     }
 
-                    if (y <= waterLevel && (state.isAir() || state.getFluidState().isEmpty())) {
+                    if (isWater) {
+                        continue;
+                    }
+
+                    if (!state.isAir() && !state.getFluidState().isEmpty()) {
+                        break;
+                    }
+
+                    if (state.isAir()) {
                         level.setBlock(cursor, water, Block.UPDATE_ALL);
                         placed++;
                     }
                 }
-
-                if (LOG_CHUNK_UPDATES && (placed > 0 || removed > 0)) {
-                    Atmosphere.LOGGER.debug("Terraform water @ ({}, {}), column {}, placed {}, removed {}", chunk.getPos().x, chunk.getPos().z, column, placed, removed);
-                }
             }
 
-            if (work.nextColumn >= 256) {
-                queue.finish(chunkKey);
-            } else {
-                queue.pushBack(chunkKey);
+            if (LOG_CHUNK_UPDATES && (placed > 0 || removed > 0)) {
+                Atmosphere.LOGGER.debug("Terraform water @ chunk ({}, {}), placed {}, removed {}", chunk.getPos().x, chunk.getPos().z, placed, removed);
             }
 
+            queue.finish(chunkKey);
             processedChunks++;
         }
     }
