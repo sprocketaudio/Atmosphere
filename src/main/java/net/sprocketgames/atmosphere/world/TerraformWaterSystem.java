@@ -13,6 +13,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.tags.FluidTags;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -115,7 +116,7 @@ public final class TerraformWaterSystem {
                     boolean isWater = state.getFluidState().is(FluidTags.WATER);
 
                     if (isWater && y > waterLevel) {
-                        chunk.setBlockState(cursor, air, false);
+                        level.setBlock(cursor, air, Block.UPDATE_ALL);
                         continue;
                     }
 
@@ -126,7 +127,7 @@ public final class TerraformWaterSystem {
 
                     boolean waterAllowed = skyConnected && y <= waterLevel;
                     if (waterAllowed && (state.isAir() || state.getFluidState().isEmpty())) {
-                        chunk.setBlockState(cursor, water, false);
+                        level.setBlock(cursor, water, Block.UPDATE_ALL);
                     }
                 }
             }
