@@ -54,17 +54,13 @@ public class TerraformIndexEvents {
             return;
         }
 
-        // Ensure chunk mutation occurs on the main server thread to avoid worldgen deadlocks.
-        serverLevel.getServer().execute(() -> {
-            if (!serverLevel.hasChunk(chunkPos.x, chunkPos.z)) {
-                return;
-            }
+        if (!serverLevel.hasChunk(chunkPos.x, chunkPos.z)) {
+            return;
+        }
 
-            LevelChunk liveChunk = serverLevel.getChunk(chunkPos.x, chunkPos.z);
-            // Strip naturally generated water when an Overworld chunk is first loaded.
-            clearWaterFromChunk(serverLevel, liveChunk);
-            data.markChunkProcessed(chunkKey);
-        });
+        // Strip naturally generated water when an Overworld chunk is first loaded.
+        clearWaterFromChunk(serverLevel, levelChunk);
+        data.markChunkProcessed(chunkKey);
     }
 
     public static void onWaterPlaced(BlockEvent.EntityPlaceEvent event) {
@@ -117,7 +113,7 @@ public class TerraformIndexEvents {
                         }
 
                         cursor.set(chunkMinX + x, sectionMinY + y, chunkMinZ + z);
-                        level.setBlock(cursor, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                        level.setBlock(cursor, Blocks.AIR.defaultBlockState(), Block.UPDATE_NONE);
                     }
                 }
             }
