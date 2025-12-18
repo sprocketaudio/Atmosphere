@@ -101,6 +101,13 @@ public final class TerraformWaterSystem {
                 continue;
             }
 
+            if (work.waitingForNeighbors && hasLoadedUnprocessedNeighbor(queue, data, work.pos, waterLevel)) {
+                queue.pushBack(chunkKey);
+                continue;
+            }
+
+            work.waitingForNeighbors = false;
+
             int placed = 0;
             int removed = 0;
             for (; work.nextColumn < 256; work.nextColumn++) {
@@ -149,10 +156,34 @@ public final class TerraformWaterSystem {
                 Atmosphere.LOGGER.debug("Terraform water @ chunk ({}, {}), placed {}, removed {}", chunk.getPos().x, chunk.getPos().z, placed, removed);
             }
 
+            if (hasLoadedUnprocessedNeighbor(queue, data, work.pos, waterLevel)) {
+                work.waitingForNeighbors = true;
+                work.nextColumn = 0;
+                queue.pushBack(chunkKey);
+                continue;
+            }
+
             data.markChunkProcessed(chunkKey, waterLevel);
             queue.finish(chunkKey);
             processedChunks++;
         }
+    }
+
+    private static boolean hasLoadedUnprocessedNeighbor(ChunkQueue queue, TerraformIndexData data, ChunkPos pos, int waterLevel) {
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                if (dx == 0 && dz == 0) {
+                    continue;
+                }
+
+                long neighborKey = ChunkPos.asLong(pos.x + dx, pos.z + dz);
+                if (queue.isLoaded(neighborKey) && !data.isChunkProcessed(neighborKey, waterLevel)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static void prioritizePlayerChunks(ServerLevel level, ChunkQueue queue, TerraformIndexData data, int waterLevel) {
@@ -227,11 +258,16 @@ public final class TerraformWaterSystem {
         void pushBack(long chunkKey) {
             order.add(chunkKey);
         }
+
+        boolean isLoaded(long chunkKey) {
+            return loaded.contains(chunkKey);
+        }
     }
 
     private static final class ChunkWork {
         final ChunkPos pos;
         int nextColumn = 0;
+        boolean waitingForNeighbors = false;
 
         ChunkWork(int chunkX, int chunkZ) {
             this.pos = new ChunkPos(chunkX, chunkZ);
