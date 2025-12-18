@@ -56,7 +56,7 @@ public class TerraformIndexEvents {
 
         // Ensure chunk mutation occurs on the main server thread to avoid worldgen deadlocks.
         serverLevel.getServer().execute(() -> {
-            if (!serverLevel.isLoaded(chunkPos)) {
+            if (!serverLevel.hasChunk(chunkPos.x, chunkPos.z)) {
                 return;
             }
 
