@@ -107,31 +107,23 @@ public final class TerraformWaterSystem {
                 int localZ = (column >>> 4) & 15;
                 int worldX = chunk.getPos().getMinBlockX() + localX;
                 int worldZ = chunk.getPos().getMinBlockZ() + localZ;
-            int surfaceAirY = chunk.getHeight(Heightmap.Types.MOTION_BLOCKING, localX, localZ);
-            int topY = Math.min(level.getMaxBuildHeight() - 1, Math.max(waterLevel, surfaceAirY));
+                int skyFloor = Math.max(minY, chunk.getHeight(Heightmap.Types.MOTION_BLOCKING, localX, localZ));
+                int topY = Math.min(level.getMaxBuildHeight() - 1, Math.max(waterLevel, skyFloor));
 
                 int placed = 0;
                 int removed = 0;
-                for (int y = topY; y >= minY; y--) {
+                for (int y = topY; y >= skyFloor; y--) {
                     cursor.set(worldX, y, worldZ);
-                    boolean skyConnected = level.canSeeSkyFromBelowWater(cursor);
-
                     BlockState state = chunk.getBlockState(cursor);
                     boolean isWater = state.getFluidState().is(FluidTags.WATER);
 
-                    if (isWater && (!skyConnected || y > waterLevel)) {
+                    if (isWater && y > waterLevel) {
                         level.setBlock(cursor, air, Block.UPDATE_ALL);
                         removed++;
                         continue;
                     }
 
-                    if (!skyConnected && y <= waterLevel) {
-                        // Below the sky-lit portion of the column; deeper blocks cannot be sky connected.
-                        break;
-                    }
-
-                    boolean waterAllowed = skyConnected && y <= waterLevel;
-                    if (waterAllowed && (state.isAir() || state.getFluidState().isEmpty())) {
+                    if (y <= waterLevel && (state.isAir() || state.getFluidState().isEmpty())) {
                         level.setBlock(cursor, water, Block.UPDATE_ALL);
                         placed++;
                     }
