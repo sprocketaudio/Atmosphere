@@ -57,6 +57,7 @@ public final class TerraformWaterSystem {
         queue.markLoaded(chunkKey);
         if (!data.isChunkProcessed(chunkKey, waterLevel)) {
             queue.ensureTask(chunkKey);
+            queue.prioritize(chunkKey);
         }
 
         scheduleProcessedNeighborsForCleanup(queue, data, waterLevel, pos, true);
