@@ -223,8 +223,15 @@ public final class TerraformWaterSystem {
                     long chunkKey = nearby.toLong();
                     if (!data.isChunkProcessed(chunkKey, waterLevel)) {
                         queue.markLoaded(chunkKey);
-                        queue.ensureTask(chunkKey);
-                        queue.prioritize(chunkKey);
+                        if (queue.hasTask(chunkKey)) {
+                            ChunkWork work = queue.peek(chunkKey);
+                            if (work != null && !work.waitingForNeighbors) {
+                                queue.prioritize(chunkKey);
+                            }
+                        } else {
+                            queue.ensureTask(chunkKey);
+                            queue.prioritize(chunkKey);
+                        }
                     }
                 }
             }
