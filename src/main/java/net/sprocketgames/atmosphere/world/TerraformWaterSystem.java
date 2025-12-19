@@ -123,6 +123,9 @@ public final class TerraformWaterSystem {
 
                 int localX = column & 15;
                 int localZ = (column >>> 4) & 15;
+                if (work.cleanupOnly && localX > 0 && localX < 15 && localZ > 0 && localZ < 15) {
+                    continue;
+                }
                 int worldX = chunk.getPos().getMinBlockX() + localX;
                 int worldZ = chunk.getPos().getMinBlockZ() + localZ;
                 int surfaceY = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, localX, localZ);
@@ -164,8 +167,11 @@ public final class TerraformWaterSystem {
                 Atmosphere.LOGGER.debug("Terraform water @ chunk ({}, {}), placed {}, removed {}", chunk.getPos().x, chunk.getPos().z, placed, removed);
             }
 
+            boolean wasInitialPass = !work.cleanupOnly;
             data.markChunkProcessed(chunkKey, waterLevel);
-            scheduleProcessedNeighborsForCleanup(queue, data, waterLevel, work.pos, true);
+            if (wasInitialPass) {
+                scheduleProcessedNeighborsForCleanup(queue, data, waterLevel, work.pos, true);
+            }
 
             queue.finish(chunkKey);
 
@@ -183,7 +189,9 @@ public final class TerraformWaterSystem {
                 long neighborKey = ChunkPos.asLong(pos.x + dx, pos.z + dz);
                 if (queue.isLoaded(neighborKey) && data.isChunkProcessed(neighborKey, waterLevel)) {
                     if (!queue.hasTask(neighborKey)) {
-                        queue.ensureTask(neighborKey);
+                        queue.ensureTask(neighborKey, true);
+                    } else {
+                        queue.flagCleanup(neighborKey);
                     }
                     if (prioritize) {
                         queue.prioritize(neighborKey);
@@ -205,7 +213,7 @@ public final class TerraformWaterSystem {
                         if (queue.hasTask(chunkKey)) {
                             queue.prioritize(chunkKey);
                         } else {
-                            queue.ensureTask(chunkKey);
+                            queue.ensureTask(chunkKey, false);
                             queue.prioritize(chunkKey);
                         }
                     }
@@ -229,9 +237,16 @@ public final class TerraformWaterSystem {
         }
 
         void ensureTask(long chunkKey) {
-            if (!tasks.containsKey(chunkKey)) {
-                tasks.put(chunkKey, new ChunkWork(ChunkPos.getX(chunkKey), ChunkPos.getZ(chunkKey)));
+            ensureTask(chunkKey, false);
+        }
+
+        void ensureTask(long chunkKey, boolean cleanupOnly) {
+            ChunkWork work = tasks.get(chunkKey);
+            if (work == null) {
+                tasks.put(chunkKey, new ChunkWork(ChunkPos.getX(chunkKey), ChunkPos.getZ(chunkKey), cleanupOnly));
                 normalOrder.add(chunkKey);
+            } else if (cleanupOnly && !work.cleanupOnly) {
+                work.cleanupOnly = true;
             }
         }
 
@@ -253,7 +268,7 @@ public final class TerraformWaterSystem {
             priorityOrder.clear();
             normalOrder.clear();
             for (long chunkKey : loaded) {
-                ensureTask(chunkKey);
+                ensureTask(chunkKey, false);
             }
         }
 
@@ -285,8 +300,11 @@ public final class TerraformWaterSystem {
             }
         }
 
-        void pushBack(long chunkKey) {
-            normalOrder.add(chunkKey);
+        void flagCleanup(long chunkKey) {
+            ChunkWork work = tasks.get(chunkKey);
+            if (work != null) {
+                work.cleanupOnly = true;
+            }
         }
 
         boolean hasPriority() {
@@ -309,9 +327,15 @@ public final class TerraformWaterSystem {
     private static final class ChunkWork {
         final ChunkPos pos;
         int nextColumn = 0;
+        boolean cleanupOnly;
 
         ChunkWork(int chunkX, int chunkZ) {
+            this(chunkX, chunkZ, false);
+        }
+
+        ChunkWork(int chunkX, int chunkZ, boolean cleanupOnly) {
             this.pos = new ChunkPos(chunkX, chunkZ);
+            this.cleanupOnly = cleanupOnly;
         }
     }
 }
