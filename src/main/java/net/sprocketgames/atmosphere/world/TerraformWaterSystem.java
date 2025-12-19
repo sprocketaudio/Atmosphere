@@ -59,7 +59,7 @@ public final class TerraformWaterSystem {
             queue.ensureTask(chunkKey);
         }
 
-        scheduleProcessedNeighborsForCleanup(queue, data, waterLevel, pos, false);
+        scheduleProcessedNeighborsForCleanup(queue, data, waterLevel, pos, true);
     }
 
     public static void unload(ServerLevel level, ChunkPos pos) {
@@ -201,8 +201,10 @@ public final class TerraformWaterSystem {
                 }
 
                 long neighborKey = ChunkPos.asLong(pos.x + dx, pos.z + dz);
-                if (queue.isLoaded(neighborKey) && data.isChunkProcessed(neighborKey, waterLevel) && !queue.hasTask(neighborKey)) {
-                    queue.ensureTask(neighborKey);
+                if (queue.isLoaded(neighborKey) && data.isChunkProcessed(neighborKey, waterLevel)) {
+                    if (!queue.hasTask(neighborKey)) {
+                        queue.ensureTask(neighborKey);
+                    }
                     if (prioritize) {
                         queue.prioritize(neighborKey);
                     }
