@@ -100,20 +100,11 @@ public final class TerraformWaterSystem {
                 continue;
             }
 
-            work.prioritized = false;
-
             LevelChunk chunk = level.getChunkSource().getChunkNow(work.pos.x, work.pos.z);
             if (chunk == null) {
                 queue.drop(chunkKey);
                 continue;
             }
-
-            if (work.waitingForNeighbors && hasLoadedUnprocessedNeighbor(queue, data, work.pos, waterLevel)) {
-                queue.pushBack(chunkKey);
-                continue;
-            }
-
-            work.waitingForNeighbors = false;
 
             int placed = 0;
             int removed = 0;
@@ -163,37 +154,13 @@ public final class TerraformWaterSystem {
                 Atmosphere.LOGGER.debug("Terraform water @ chunk ({}, {}), placed {}, removed {}", chunk.getPos().x, chunk.getPos().z, placed, removed);
             }
 
-            boolean hasPendingNeighbor = hasLoadedUnprocessedNeighbor(queue, data, work.pos, waterLevel);
             data.markChunkProcessed(chunkKey, waterLevel);
             scheduleProcessedNeighborsForCleanup(queue, data, waterLevel, work.pos, true);
 
-            if (hasPendingNeighbor) {
-                work.waitingForNeighbors = true;
-                work.nextColumn = 0;
-                queue.pushBack(chunkKey);
-            } else {
-                queue.finish(chunkKey);
-            }
+            queue.finish(chunkKey);
 
             processedChunks++;
         }
-    }
-
-    private static boolean hasLoadedUnprocessedNeighbor(ChunkQueue queue, TerraformIndexData data, ChunkPos pos, int waterLevel) {
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dz = -1; dz <= 1; dz++) {
-                if (dx == 0 && dz == 0) {
-                    continue;
-                }
-
-                long neighborKey = ChunkPos.asLong(pos.x + dx, pos.z + dz);
-                if (queue.isLoaded(neighborKey) && !data.isChunkProcessed(neighborKey, waterLevel)) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
     }
 
     private static void scheduleProcessedNeighborsForCleanup(ChunkQueue queue, TerraformIndexData data, int waterLevel, ChunkPos pos, boolean prioritize) {
@@ -225,11 +192,8 @@ public final class TerraformWaterSystem {
                     long chunkKey = nearby.toLong();
                     if (!data.isChunkProcessed(chunkKey, waterLevel)) {
                         queue.markLoaded(chunkKey);
-                        ChunkWork work = queue.peek(chunkKey);
-                        if (work != null) {
-                            if (!work.waitingForNeighbors && !work.prioritized) {
-                                queue.prioritize(chunkKey);
-                            }
+                        if (queue.hasTask(chunkKey)) {
+                            queue.prioritize(chunkKey);
                         } else {
                             queue.ensureTask(chunkKey);
                             queue.prioritize(chunkKey);
@@ -292,10 +256,6 @@ public final class TerraformWaterSystem {
             if (tasks.containsKey(chunkKey)) {
                 order.remove(chunkKey);
                 order.addFirst(chunkKey);
-                ChunkWork work = tasks.get(chunkKey);
-                if (work != null) {
-                    work.prioritized = true;
-                }
             }
         }
 
@@ -315,8 +275,6 @@ public final class TerraformWaterSystem {
     private static final class ChunkWork {
         final ChunkPos pos;
         int nextColumn = 0;
-        boolean waitingForNeighbors = false;
-        boolean prioritized = false;
 
         ChunkWork(int chunkX, int chunkZ) {
             this.pos = new ChunkPos(chunkX, chunkZ);
