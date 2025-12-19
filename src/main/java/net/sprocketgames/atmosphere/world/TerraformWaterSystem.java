@@ -59,7 +59,7 @@ public final class TerraformWaterSystem {
             queue.ensureTask(chunkKey);
         }
 
-        scheduleProcessedNeighborsForCleanup(queue, data, waterLevel, pos);
+        scheduleProcessedNeighborsForCleanup(queue, data, waterLevel, pos, false);
     }
 
     public static void unload(ServerLevel level, ChunkPos pos) {
@@ -162,6 +162,7 @@ public final class TerraformWaterSystem {
 
             boolean hasPendingNeighbor = hasLoadedUnprocessedNeighbor(queue, data, work.pos, waterLevel);
             data.markChunkProcessed(chunkKey, waterLevel);
+            scheduleProcessedNeighborsForCleanup(queue, data, waterLevel, work.pos, true);
 
             if (hasPendingNeighbor) {
                 work.waitingForNeighbors = true;
@@ -192,7 +193,7 @@ public final class TerraformWaterSystem {
         return false;
     }
 
-    private static void scheduleProcessedNeighborsForCleanup(ChunkQueue queue, TerraformIndexData data, int waterLevel, ChunkPos pos) {
+    private static void scheduleProcessedNeighborsForCleanup(ChunkQueue queue, TerraformIndexData data, int waterLevel, ChunkPos pos, boolean prioritize) {
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
                 if (dx == 0 && dz == 0) {
@@ -202,6 +203,9 @@ public final class TerraformWaterSystem {
                 long neighborKey = ChunkPos.asLong(pos.x + dx, pos.z + dz);
                 if (queue.isLoaded(neighborKey) && data.isChunkProcessed(neighborKey, waterLevel) && !queue.hasTask(neighborKey)) {
                     queue.ensureTask(neighborKey);
+                    if (prioritize) {
+                        queue.prioritize(neighborKey);
+                    }
                 }
             }
         }
