@@ -97,24 +97,34 @@ public final class TerraformWaterSystem {
 
         while (processedChunks < MAX_CHUNKS_PER_TICK) {
             long chunkKey;
+            boolean fromPriority;
             if (processedChunks == 0 && queue.hasPriority()) {
                 chunkKey = queue.popPriority();
+                fromPriority = true;
             } else if (queue.hasNormal()) {
                 chunkKey = queue.popNormal();
+                fromPriority = false;
             } else if (queue.hasPriority()) {
                 chunkKey = queue.popPriority();
+                fromPriority = true;
             } else {
                 break;
             }
 
             ChunkWork work = queue.peek(chunkKey);
             if (work == null) {
+                processedChunks++;
                 continue;
             }
 
             LevelChunk chunk = level.getChunkSource().getChunkNow(work.pos.x, work.pos.z);
             if (chunk == null) {
-                queue.drop(chunkKey);
+                if (queue.isLoaded(chunkKey)) {
+                    queue.requeue(chunkKey, fromPriority);
+                } else {
+                    queue.drop(chunkKey);
+                }
+                processedChunks++;
                 continue;
             }
 
@@ -306,6 +316,19 @@ public final class TerraformWaterSystem {
             ChunkWork work = tasks.get(chunkKey);
             if (work != null) {
                 work.cleanupOnly = true;
+            }
+        }
+
+        void requeue(long chunkKey, boolean priority) {
+            if (!tasks.containsKey(chunkKey)) {
+                return;
+            }
+            if (priority) {
+                priorityOrder.remove(chunkKey);
+                priorityOrder.addLast(chunkKey);
+            } else {
+                normalOrder.remove(chunkKey);
+                normalOrder.addLast(chunkKey);
             }
         }
 
