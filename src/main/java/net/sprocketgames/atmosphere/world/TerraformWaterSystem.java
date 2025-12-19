@@ -100,6 +100,8 @@ public final class TerraformWaterSystem {
                 continue;
             }
 
+            work.prioritized = false;
+
             LevelChunk chunk = level.getChunkSource().getChunkNow(work.pos.x, work.pos.z);
             if (chunk == null) {
                 queue.drop(chunkKey);
