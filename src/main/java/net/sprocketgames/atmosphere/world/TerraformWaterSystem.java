@@ -93,8 +93,18 @@ public final class TerraformWaterSystem {
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         int processedChunks = 0;
 
-        while (!queue.isEmpty() && processedChunks < MAX_CHUNKS_PER_TICK) {
-            long chunkKey = queue.pop();
+        while (processedChunks < MAX_CHUNKS_PER_TICK) {
+            long chunkKey;
+            if (processedChunks == 0 && queue.hasPriority()) {
+                chunkKey = queue.popPriority();
+            } else if (queue.hasNormal()) {
+                chunkKey = queue.popNormal();
+            } else if (queue.hasPriority()) {
+                chunkKey = queue.popPriority();
+            } else {
+                break;
+            }
+
             ChunkWork work = queue.peek(chunkKey);
             if (work == null) {
                 continue;
@@ -206,11 +216,12 @@ public final class TerraformWaterSystem {
 
     private static final class ChunkQueue {
         private final Long2ObjectMap<ChunkWork> tasks = new Long2ObjectOpenHashMap<>();
-        private final ArrayDeque<Long> order = new ArrayDeque<>();
+        private final ArrayDeque<Long> priorityOrder = new ArrayDeque<>();
+        private final ArrayDeque<Long> normalOrder = new ArrayDeque<>();
         private final LongLinkedOpenHashSet loaded = new LongLinkedOpenHashSet();
 
         boolean isEmpty() {
-            return order.isEmpty();
+            return priorityOrder.isEmpty() && normalOrder.isEmpty();
         }
 
         void markLoaded(long chunkKey) {
@@ -220,31 +231,39 @@ public final class TerraformWaterSystem {
         void ensureTask(long chunkKey) {
             if (!tasks.containsKey(chunkKey)) {
                 tasks.put(chunkKey, new ChunkWork(ChunkPos.getX(chunkKey), ChunkPos.getZ(chunkKey)));
-                order.add(chunkKey);
+                normalOrder.add(chunkKey);
             }
         }
 
         void drop(long chunkKey) {
             tasks.remove(chunkKey);
             loaded.remove(chunkKey);
-            order.remove(chunkKey);
+            priorityOrder.remove(chunkKey);
+            normalOrder.remove(chunkKey);
         }
 
         void finish(long chunkKey) {
             tasks.remove(chunkKey);
-            order.remove(chunkKey);
+            priorityOrder.remove(chunkKey);
+            normalOrder.remove(chunkKey);
         }
 
         void requeueLoaded() {
             tasks.clear();
-            order.clear();
+            priorityOrder.clear();
+            normalOrder.clear();
             for (long chunkKey : loaded) {
                 ensureTask(chunkKey);
             }
         }
 
-        long pop() {
-            Long value = order.poll();
+        long popPriority() {
+            Long value = priorityOrder.poll();
+            return value == null ? 0L : value;
+        }
+
+        long popNormal() {
+            Long value = normalOrder.poll();
             return value == null ? 0L : value;
         }
 
@@ -254,13 +273,28 @@ public final class TerraformWaterSystem {
 
         void prioritize(long chunkKey) {
             if (tasks.containsKey(chunkKey)) {
-                order.remove(chunkKey);
-                order.addFirst(chunkKey);
+                if (priorityOrder.remove(chunkKey)) {
+                    priorityOrder.addFirst(chunkKey);
+                    return;
+                }
+                if (normalOrder.remove(chunkKey)) {
+                    priorityOrder.addFirst(chunkKey);
+                } else {
+                    priorityOrder.addFirst(chunkKey);
+                }
             }
         }
 
         void pushBack(long chunkKey) {
-            order.add(chunkKey);
+            normalOrder.add(chunkKey);
+        }
+
+        boolean hasPriority() {
+            return !priorityOrder.isEmpty();
+        }
+
+        boolean hasNormal() {
+            return !normalOrder.isEmpty();
         }
 
         boolean isLoaded(long chunkKey) {
