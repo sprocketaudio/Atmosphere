@@ -456,46 +456,57 @@
                         }
                       },
                       "then_run": {
-                        "type": "minecraft:sequence",
-                        "sequence": [
-                          {
-                            "type": "minecraft:condition",
-                            "if_true": {
-                              "type": "minecraft:biome",
-                              "biome_is": [
-                                "minecraft:river",
-                                "minecraft:frozen_river"
-                              ]
+                        "type": "minecraft:condition",
+                        "if_true": {
+                          "type": "minecraft:y_above",
+                          "add_stone_depth": false,
+                          "anchor": {
+                            "absolute": 50
+                          },
+                          "surface_depth_multiplier": 0
+                        },
+                        "then_run": {
+                          "type": "minecraft:sequence",
+                          "sequence": [
+                            {
+                              "type": "minecraft:condition",
+                              "if_true": {
+                                "type": "minecraft:biome",
+                                "biome_is": [
+                                  "minecraft:river",
+                                  "minecraft:frozen_river"
+                                ]
+                              },
+                              "then_run": {
+                                "type": "minecraft:block",
+                                "result_state": {
+                                  "Name": "minecraft:clay"
+                                }
+                              }
                             },
-                            "then_run": {
+                            {
+                              "type": "minecraft:condition",
+                              "if_true": {
+                                "type": "minecraft:noise_threshold",
+                                "max_threshold": 0.05,
+                                "min_threshold": -0.05,
+                                "noise": "minecraft:gravel"
+                              },
+                              "then_run": {
+                                "type": "minecraft:block",
+                                "result_state": {
+                                  "Name": "minecraft:gravel"
+                                }
+                              }
+                            },
+                            {
                               "type": "minecraft:block",
                               "result_state": {
-                                "Name": "minecraft:clay"
+                                "Name": "minecraft:sand"
                               }
                             }
-                          },
-                          {
-                            "type": "minecraft:condition",
-                            "if_true": {
-                              "type": "minecraft:noise_threshold",
-                              "max_threshold": 0.05,
-                              "min_threshold": -0.05,
-                              "noise": "minecraft:gravel"
-                            },
-                            "then_run": {
-                              "type": "minecraft:block",
-                              "result_state": {
-                                "Name": "minecraft:gravel"
-                              }
-                            }
-                          },
-                          {
-                            "type": "minecraft:block",
-                            "result_state": {
-                              "Name": "minecraft:sand"
-                            }
-                          }
-                        ]
+                          ]
+                        }
                       }
                     }
                   },
