@@ -91,7 +91,6 @@ public final class TerraformWaterSystem {
         }
 
         BlockState air = Blocks.AIR.defaultBlockState();
-        BlockState gravel = Blocks.GRAVEL.defaultBlockState();
         BlockState water = Blocks.WATER.defaultBlockState();
         boolean allowWaterPlacement = waterLevel > level.getMinBuildHeight();
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
@@ -154,7 +153,7 @@ public final class TerraformWaterSystem {
 
                     if (y > waterLevel) {
                         if (isWater) {
-                            level.setBlock(cursor, allowWaterPlacement ? air : gravel, Block.UPDATE_ALL);
+                            level.setBlock(cursor, air, Block.UPDATE_ALL);
                             removed++;
                         }
                         continue;
@@ -162,7 +161,7 @@ public final class TerraformWaterSystem {
 
                     if (isWater) {
                         if (!allowWaterPlacement) {
-                            level.setBlock(cursor, gravel, Block.UPDATE_ALL);
+                            level.setBlock(cursor, air, Block.UPDATE_ALL);
                             removed++;
                         } else if (!isSourceWater) {
                             level.setBlock(cursor, water, Block.UPDATE_ALL);
