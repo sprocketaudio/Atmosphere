@@ -53,9 +53,16 @@ public final class TerraformWaterSystem {
         TerraformIndexData data = TerraformIndexData.get(level);
         int waterLevel = data.getWaterLevelY();
         long chunkKey = pos.toLong();
+
+        queue.markLoaded(chunkKey);
         if (!data.isChunkProcessed(chunkKey, waterLevel)) {
-            queue.trackLoaded(chunkKey);
+            queue.ensureTask(chunkKey);
+            queue.prioritize(chunkKey);
+        } else if (!queue.hasTask(chunkKey)) {
+            queue.ensureTask(chunkKey);
         }
+
+        scheduleProcessedNeighborsForCleanup(queue, data, waterLevel, pos, true);
     }
 
     public static void unload(ServerLevel level, ChunkPos pos) {
@@ -88,16 +95,36 @@ public final class TerraformWaterSystem {
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         int processedChunks = 0;
 
-        while (!queue.isEmpty() && processedChunks < MAX_CHUNKS_PER_TICK) {
-            long chunkKey = queue.pop();
+        while (processedChunks < MAX_CHUNKS_PER_TICK) {
+            long chunkKey;
+            boolean fromPriority;
+            if (processedChunks == 0 && queue.hasPriority()) {
+                chunkKey = queue.popPriority();
+                fromPriority = true;
+            } else if (queue.hasNormal()) {
+                chunkKey = queue.popNormal();
+                fromPriority = false;
+            } else if (queue.hasPriority()) {
+                chunkKey = queue.popPriority();
+                fromPriority = true;
+            } else {
+                break;
+            }
+
             ChunkWork work = queue.peek(chunkKey);
             if (work == null) {
+                processedChunks++;
                 continue;
             }
 
             LevelChunk chunk = level.getChunkSource().getChunkNow(work.pos.x, work.pos.z);
             if (chunk == null) {
-                queue.drop(chunkKey);
+                if (queue.isLoaded(chunkKey)) {
+                    queue.requeue(chunkKey, fromPriority);
+                } else {
+                    queue.drop(chunkKey);
+                }
+                processedChunks++;
                 continue;
             }
 
@@ -108,12 +135,15 @@ public final class TerraformWaterSystem {
 
                 int localX = column & 15;
                 int localZ = (column >>> 4) & 15;
+                if (work.cleanupOnly && localX > 0 && localX < 15 && localZ > 0 && localZ < 15) {
+                    continue;
+                }
                 int worldX = chunk.getPos().getMinBlockX() + localX;
                 int worldZ = chunk.getPos().getMinBlockZ() + localZ;
                 int surfaceY = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, localX, localZ);
                 int topY = level.getMaxBuildHeight() - 1;
 
-                for (int y = topY; y >= surfaceY; y--) {
+                for (int y = topY; y >= Math.max(level.getMinBuildHeight(), waterLevel); y--) {
                     cursor.set(worldX, y, worldZ);
                     BlockState state = chunk.getBlockState(cursor);
                     var fluidState = state.getFluidState();
@@ -137,9 +167,6 @@ public final class TerraformWaterSystem {
                     }
 
                     if (!state.isAir()) {
-                        if (!state.getFluidState().is(FluidTags.WATER)) {
-                            break;
-                        }
                         continue;
                     }
 
@@ -152,9 +179,37 @@ public final class TerraformWaterSystem {
                 Atmosphere.LOGGER.debug("Terraform water @ chunk ({}, {}), placed {}, removed {}", chunk.getPos().x, chunk.getPos().z, placed, removed);
             }
 
+            boolean wasInitialPass = !work.cleanupOnly;
             data.markChunkProcessed(chunkKey, waterLevel);
+            if (wasInitialPass) {
+                scheduleProcessedNeighborsForCleanup(queue, data, waterLevel, work.pos, true);
+            }
+
             queue.finish(chunkKey);
+
             processedChunks++;
+        }
+    }
+
+    private static void scheduleProcessedNeighborsForCleanup(ChunkQueue queue, TerraformIndexData data, int waterLevel, ChunkPos pos, boolean prioritize) {
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                if (dx == 0 && dz == 0) {
+                    continue;
+                }
+
+                long neighborKey = ChunkPos.asLong(pos.x + dx, pos.z + dz);
+                if (queue.isLoaded(neighborKey) && data.isChunkProcessed(neighborKey, waterLevel)) {
+                    if (!queue.hasTask(neighborKey)) {
+                        queue.ensureTask(neighborKey, true);
+                    } else {
+                        queue.flagCleanup(neighborKey);
+                    }
+                    if (prioritize) {
+                        queue.prioritize(neighborKey);
+                    }
+                }
+            }
         }
     }
 
@@ -166,8 +221,13 @@ public final class TerraformWaterSystem {
                     ChunkPos nearby = new ChunkPos(playerChunk.x + dx, playerChunk.z + dz);
                     long chunkKey = nearby.toLong();
                     if (!data.isChunkProcessed(chunkKey, waterLevel)) {
-                        queue.trackLoaded(chunkKey);
-                        queue.prioritize(chunkKey);
+                        queue.markLoaded(chunkKey);
+                        if (queue.hasTask(chunkKey)) {
+                            queue.prioritize(chunkKey);
+                        } else {
+                            queue.ensureTask(chunkKey, false);
+                            queue.prioritize(chunkKey);
+                        }
                     }
                 }
             }
@@ -176,43 +236,61 @@ public final class TerraformWaterSystem {
 
     private static final class ChunkQueue {
         private final Long2ObjectMap<ChunkWork> tasks = new Long2ObjectOpenHashMap<>();
-        private final ArrayDeque<Long> order = new ArrayDeque<>();
+        private final ArrayDeque<Long> priorityOrder = new ArrayDeque<>();
+        private final ArrayDeque<Long> normalOrder = new ArrayDeque<>();
         private final LongLinkedOpenHashSet loaded = new LongLinkedOpenHashSet();
 
         boolean isEmpty() {
-            return order.isEmpty();
+            return priorityOrder.isEmpty() && normalOrder.isEmpty();
         }
 
-        void trackLoaded(long chunkKey) {
+        void markLoaded(long chunkKey) {
             loaded.add(chunkKey);
-            if (!tasks.containsKey(chunkKey)) {
-                tasks.put(chunkKey, new ChunkWork(ChunkPos.getX(chunkKey), ChunkPos.getZ(chunkKey)));
-                order.add(chunkKey);
+        }
+
+        void ensureTask(long chunkKey) {
+            ensureTask(chunkKey, false);
+        }
+
+        void ensureTask(long chunkKey, boolean cleanupOnly) {
+            ChunkWork work = tasks.get(chunkKey);
+            if (work == null) {
+                tasks.put(chunkKey, new ChunkWork(ChunkPos.getX(chunkKey), ChunkPos.getZ(chunkKey), cleanupOnly));
+                normalOrder.add(chunkKey);
+            } else if (cleanupOnly && !work.cleanupOnly) {
+                work.cleanupOnly = true;
             }
         }
 
         void drop(long chunkKey) {
             tasks.remove(chunkKey);
             loaded.remove(chunkKey);
-            order.remove(chunkKey);
+            priorityOrder.remove(chunkKey);
+            normalOrder.remove(chunkKey);
         }
 
         void finish(long chunkKey) {
             tasks.remove(chunkKey);
-            order.remove(chunkKey);
+            priorityOrder.remove(chunkKey);
+            normalOrder.remove(chunkKey);
         }
 
         void requeueLoaded() {
             tasks.clear();
-            order.clear();
+            priorityOrder.clear();
+            normalOrder.clear();
             for (long chunkKey : loaded) {
-                tasks.put(chunkKey, new ChunkWork(ChunkPos.getX(chunkKey), ChunkPos.getZ(chunkKey)));
-                order.add(chunkKey);
+                ensureTask(chunkKey, false);
             }
         }
 
-        long pop() {
-            Long value = order.poll();
+        long popPriority() {
+            Long value = priorityOrder.poll();
+            return value == null ? 0L : value;
+        }
+
+        long popNormal() {
+            Long value = normalOrder.poll();
             return value == null ? 0L : value;
         }
 
@@ -222,22 +300,67 @@ public final class TerraformWaterSystem {
 
         void prioritize(long chunkKey) {
             if (tasks.containsKey(chunkKey)) {
-                order.remove(chunkKey);
-                order.addFirst(chunkKey);
+                if (priorityOrder.remove(chunkKey)) {
+                    priorityOrder.addFirst(chunkKey);
+                    return;
+                }
+                if (normalOrder.remove(chunkKey)) {
+                    priorityOrder.addFirst(chunkKey);
+                } else {
+                    priorityOrder.addFirst(chunkKey);
+                }
             }
         }
 
-        void pushBack(long chunkKey) {
-            order.add(chunkKey);
+        void flagCleanup(long chunkKey) {
+            ChunkWork work = tasks.get(chunkKey);
+            if (work != null) {
+                work.cleanupOnly = true;
+            }
+        }
+
+        void requeue(long chunkKey, boolean priority) {
+            if (!tasks.containsKey(chunkKey)) {
+                return;
+            }
+            if (priority) {
+                priorityOrder.remove(chunkKey);
+                priorityOrder.addLast(chunkKey);
+            } else {
+                normalOrder.remove(chunkKey);
+                normalOrder.addLast(chunkKey);
+            }
+        }
+
+        boolean hasPriority() {
+            return !priorityOrder.isEmpty();
+        }
+
+        boolean hasNormal() {
+            return !normalOrder.isEmpty();
+        }
+
+        boolean isLoaded(long chunkKey) {
+            return loaded.contains(chunkKey);
+        }
+
+        boolean hasTask(long chunkKey) {
+            return tasks.containsKey(chunkKey);
         }
     }
 
     private static final class ChunkWork {
         final ChunkPos pos;
         int nextColumn = 0;
+        boolean cleanupOnly;
 
         ChunkWork(int chunkX, int chunkZ) {
+            this(chunkX, chunkZ, false);
+        }
+
+        ChunkWork(int chunkX, int chunkZ, boolean cleanupOnly) {
             this.pos = new ChunkPos(chunkX, chunkZ);
+            this.cleanupOnly = cleanupOnly;
         }
     }
 }
