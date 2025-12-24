@@ -86,7 +86,6 @@ public class TerraformIndexData extends SavedData {
     public void setWaterLevelY(int waterLevelY) {
         if (this.waterLevelY != waterLevelY) {
             this.waterLevelY = waterLevelY;
-            this.processedWaterLevels.clear();
             setDirty();
         }
     }
@@ -101,6 +100,10 @@ public class TerraformIndexData extends SavedData {
 
     public boolean isChunkProcessed(long chunkKey, int waterLevel) {
         return processedWaterLevels.get(chunkKey) == waterLevel;
+    }
+
+    public int getProcessedWaterLevel(long chunkKey) {
+        return processedWaterLevels.get(chunkKey);
     }
 
     public void markChunkProcessed(long chunkKey, int waterLevel) {

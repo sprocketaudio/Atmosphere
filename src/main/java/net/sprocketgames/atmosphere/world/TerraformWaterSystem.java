@@ -8,17 +8,18 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongLinkedOpenHashSet;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.SectionPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.tags.FluidTags;
-import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.chunk.LevelChunk;
-import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.neoforged.neoforge.event.tick.LevelTickEvent;
 import net.sprocketgames.atmosphere.Atmosphere;
 import net.sprocketgames.atmosphere.data.TerraformIndexData;
@@ -90,9 +91,6 @@ public final class TerraformWaterSystem {
             return;
         }
 
-        BlockState air = Blocks.AIR.defaultBlockState();
-        BlockState water = Blocks.WATER.defaultBlockState();
-        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         int processedChunks = 0;
 
         while (processedChunks < MAX_CHUNKS_PER_TICK) {
@@ -128,52 +126,10 @@ public final class TerraformWaterSystem {
                 continue;
             }
 
-            int placed = 0;
-            int removed = 0;
-            for (; work.nextColumn < 256; work.nextColumn++) {
-                int column = work.nextColumn;
-
-                int localX = column & 15;
-                int localZ = (column >>> 4) & 15;
-                if (work.cleanupOnly && localX > 0 && localX < 15 && localZ > 0 && localZ < 15) {
-                    continue;
-                }
-                int worldX = chunk.getPos().getMinBlockX() + localX;
-                int worldZ = chunk.getPos().getMinBlockZ() + localZ;
-                int surfaceY = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, localX, localZ);
-                int topY = level.getMaxBuildHeight() - 1;
-
-                for (int y = topY; y >= Math.max(level.getMinBuildHeight(), waterLevel); y--) {
-                    cursor.set(worldX, y, worldZ);
-                    BlockState state = chunk.getBlockState(cursor);
-                    var fluidState = state.getFluidState();
-                    boolean isWater = fluidState.is(FluidTags.WATER);
-                    boolean isSourceWater = isWater && fluidState.isSource();
-
-                    if (y > waterLevel) {
-                        if (isWater) {
-                            level.setBlock(cursor, air, Block.UPDATE_ALL);
-                            removed++;
-                        }
-                        continue;
-                    }
-
-                    if (isWater) {
-                        if (!isSourceWater) {
-                            level.setBlock(cursor, water, Block.UPDATE_ALL);
-                            placed++;
-                        }
-                        continue;
-                    }
-
-                    if (!state.isAir()) {
-                        continue;
-                    }
-
-                    level.setBlock(cursor, water, Block.UPDATE_ALL);
-                    placed++;
-                }
-            }
+            int previousWaterLevel = data.getProcessedWaterLevel(chunkKey);
+            boolean allowWaterPlacement = previousWaterLevel == Integer.MIN_VALUE || waterLevel > previousWaterLevel;
+            int removed = fastDrainChunk(chunk, waterLevel, level);
+            int placed = allowWaterPlacement ? fastFillChunk(chunk, waterLevel, level) : 0;
 
             if (LOG_CHUNK_UPDATES && (placed > 0 || removed > 0)) {
                 Atmosphere.LOGGER.debug("Terraform water @ chunk ({}, {}), placed {}, removed {}", chunk.getPos().x, chunk.getPos().z, placed, removed);
@@ -189,6 +145,154 @@ public final class TerraformWaterSystem {
 
             processedChunks++;
         }
+    }
+
+    private static int fastDrainChunk(LevelChunk chunk, int waterLevelY, ServerLevel level) {
+        int removed = 0;
+        int minSection = chunk.getMinSection();
+        int maxSection = chunk.getMaxSection();
+        int startSection = Math.max(minSection, SectionPos.blockToSectionCoord(waterLevelY));
+        BlockState air = Blocks.AIR.defaultBlockState();
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+
+        for (int sectionY = startSection; sectionY < maxSection; sectionY++) {
+            int sectionMinY = SectionPos.sectionToBlockCoord(sectionY);
+            int sectionMaxY = sectionMinY + 15;
+            if (sectionMaxY <= waterLevelY) {
+                continue;
+            }
+
+            LevelChunkSection section = chunk.getSection(chunk.getSectionIndexFromSectionY(sectionY));
+            if (!section.maybeHas(state -> state.getFluidState().is(FluidTags.WATER) || (state.hasProperty(BlockStateProperties.WATERLOGGED) && state.getValue(BlockStateProperties.WATERLOGGED)))) {
+                continue;
+            }
+
+            int minLocalY = Math.max(0, waterLevelY - sectionMinY + 1);
+            int worldBaseX = chunk.getPos().getMinBlockX();
+            int worldBaseZ = chunk.getPos().getMinBlockZ();
+            // NeoForge 1.21 uses section.acquire/release + setBlockState(..., false) to avoid per-call locks.
+            // If APIs differ, use section.getStates().acquire()/release() or section.setBlockState(x,y,z,state) as available.
+            section.acquire();
+            try {
+                for (int y = minLocalY; y < 16; y++) {
+                    int worldY = sectionMinY + y;
+                    for (int x = 0; x < 16; x++) {
+                        int worldX = worldBaseX + x;
+                        for (int z = 0; z < 16; z++) {
+                            BlockState state = section.getBlockState(x, y, z);
+                            if (state.hasProperty(BlockStateProperties.WATERLOGGED) && state.getValue(BlockStateProperties.WATERLOGGED)) {
+                                BlockState cleared = state.setValue(BlockStateProperties.WATERLOGGED, false);
+                                section.setBlockState(x, y, z, cleared, false);
+                                cursor.set(worldX, worldY, worldBaseZ + z);
+                                level.getChunkSource().blockChanged(cursor);
+                                removed++;
+                                continue;
+                            }
+
+                            if (!state.getFluidState().is(FluidTags.WATER)) {
+                                continue;
+                            }
+
+                            section.setBlockState(x, y, z, air, false);
+                            cursor.set(worldX, worldY, worldBaseZ + z);
+                            level.getChunkSource().blockChanged(cursor);
+                            removed++;
+                        }
+                    }
+                }
+            } finally {
+                section.release();
+            }
+        }
+
+        if (removed > 0) {
+            chunk.setUnsaved(true);
+        }
+
+        return removed;
+    }
+
+    private static int fastFillChunk(LevelChunk chunk, int waterLevelY, ServerLevel level) {
+        int placed = 0;
+        int minSection = chunk.getMinSection();
+        int maxSection = chunk.getMaxSection();
+        int endSection = Math.min(maxSection, SectionPos.blockToSectionCoord(waterLevelY) + 1);
+        BlockState water = Blocks.WATER.defaultBlockState();
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+
+        for (int sectionY = minSection; sectionY < endSection; sectionY++) {
+            int sectionMinY = SectionPos.sectionToBlockCoord(sectionY);
+            int sectionMaxY = sectionMinY + 15;
+            if (sectionMinY > waterLevelY) {
+                continue;
+            }
+
+            LevelChunkSection section = chunk.getSection(chunk.getSectionIndexFromSectionY(sectionY));
+            int maxLocalY = Math.min(15, waterLevelY - sectionMinY);
+            boolean fullSection = sectionMaxY <= waterLevelY;
+
+            if (fullSection && section.hasOnlyAir()) {
+                int worldBaseX = chunk.getPos().getMinBlockX();
+                int worldBaseZ = chunk.getPos().getMinBlockZ();
+                // NeoForge 1.21 uses section.acquire/release + setBlockState(..., false) for bulk edits.
+                // If APIs differ, fall back to section.setBlockState without the locking flag.
+                section.acquire();
+                try {
+                    for (int y = 0; y < 16; y++) {
+                        int worldY = sectionMinY + y;
+                        for (int x = 0; x < 16; x++) {
+                            int worldX = worldBaseX + x;
+                            for (int z = 0; z < 16; z++) {
+                                section.setBlockState(x, y, z, water, false);
+                                cursor.set(worldX, worldY, worldBaseZ + z);
+                                level.getChunkSource().blockChanged(cursor);
+                                placed++;
+                            }
+                        }
+                    }
+                } finally {
+                    section.release();
+                }
+                continue;
+            }
+
+            if (!section.maybeHas(BlockState::isAir)) {
+                continue;
+            }
+
+            int worldBaseX = chunk.getPos().getMinBlockX();
+            int worldBaseZ = chunk.getPos().getMinBlockZ();
+            // NeoForge 1.21 uses section.acquire/release + setBlockState(..., false) for bulk edits.
+            // If APIs differ, fall back to section.setBlockState without the locking flag.
+            section.acquire();
+            try {
+                for (int y = 0; y <= maxLocalY; y++) {
+                    int worldY = sectionMinY + y;
+                    for (int x = 0; x < 16; x++) {
+                        int worldX = worldBaseX + x;
+                        for (int z = 0; z < 16; z++) {
+                            BlockState state = section.getBlockState(x, y, z);
+                            if (!state.isAir()) {
+                                continue;
+                            }
+
+                            section.setBlockState(x, y, z, water, false);
+                            cursor.set(worldX, worldY, worldBaseZ + z);
+                            level.getChunkSource().blockChanged(cursor);
+                            placed++;
+                        }
+                    }
+                }
+            } finally {
+                section.release();
+            }
+        }
+
+        if (placed > 0) {
+            chunk.setUnsaved(true);
+        }
+
+        return placed;
     }
 
     private static void scheduleProcessedNeighborsForCleanup(ChunkQueue queue, TerraformIndexData data, int waterLevel, ChunkPos pos, boolean prioritize) {
