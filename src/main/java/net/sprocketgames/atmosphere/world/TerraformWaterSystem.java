@@ -64,16 +64,6 @@ public final class TerraformWaterSystem {
         scheduleProcessedNeighborsForCleanup(queue, data, waterLevel, pos, true);
     }
 
-    public static void applyWaterLevelImmediate(ServerLevel level, LevelChunk chunk) {
-        TerraformIndexData data = TerraformIndexData.get(level);
-        int waterLevel = data.getWaterLevelY();
-        if (waterLevel > level.getMinBuildHeight()) {
-            return;
-        }
-
-        drainChunkWater(level, chunk, waterLevel);
-        data.markChunkProcessed(chunk.getPos().toLong(), waterLevel);
-    }
 
     public static void unload(ServerLevel level, ChunkPos pos) {
         ChunkQueue queue = queueFor(level);
@@ -206,33 +196,6 @@ public final class TerraformWaterSystem {
         }
     }
 
-    private static void drainChunkWater(ServerLevel level, LevelChunk chunk, int waterLevel) {
-        BlockState air = Blocks.AIR.defaultBlockState();
-        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
-        int topY = level.getMaxBuildHeight() - 1;
-        int minY = Math.max(level.getMinBuildHeight(), waterLevel);
-        int removed = 0;
-
-        for (int column = 0; column < 256; column++) {
-            int localX = column & 15;
-            int localZ = (column >>> 4) & 15;
-            int worldX = chunk.getPos().getMinBlockX() + localX;
-            int worldZ = chunk.getPos().getMinBlockZ() + localZ;
-
-            for (int y = topY; y >= minY; y--) {
-                cursor.set(worldX, y, worldZ);
-                BlockState state = chunk.getBlockState(cursor);
-                if (state.getFluidState().is(FluidTags.WATER)) {
-                    level.setBlock(cursor, air, Block.UPDATE_ALL);
-                    removed++;
-                }
-            }
-        }
-
-        if (LOG_CHUNK_UPDATES && removed > 0) {
-            Atmosphere.LOGGER.debug("Terraform water immediate drain @ chunk ({}, {}), removed {}", chunk.getPos().x, chunk.getPos().z, removed);
-        }
-    }
 
     private static void scheduleProcessedNeighborsForCleanup(ChunkQueue queue, TerraformIndexData data, int waterLevel, ChunkPos pos, boolean prioritize) {
         for (int dx = -1; dx <= 1; dx++) {

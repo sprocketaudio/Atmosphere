@@ -35,7 +35,6 @@ public class TerraformIndexEvents {
             return;
         }
 
-        TerraformWaterSystem.applyWaterLevelImmediate(serverLevel, levelChunk);
         TerraformWaterSystem.enqueue(serverLevel, levelChunk.getPos());
     }
 

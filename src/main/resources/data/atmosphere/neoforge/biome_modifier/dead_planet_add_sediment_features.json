@@ -1,0 +1,10 @@
+{
+  "type": "neoforge:add_features",
+  "biomes": "#minecraft:is_overworld",
+  "features": [
+    "minecraft:disk_sand",
+    "minecraft:disk_gravel",
+    "minecraft:disk_clay"
+  ],
+  "step": "top_layer_modification"
+}
