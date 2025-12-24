@@ -27,6 +27,7 @@ import net.sprocketgames.atmosphere.data.TerraformIndexData;
  */
 public final class TerraformWaterSystem {
     private static final int MAX_CHUNKS_PER_TICK = 2;
+    private static final int MAX_DRAIN_CHUNKS_PER_TICK = 16;
     private static final int PLAYER_PRIORITY_RADIUS = 2;
 
     private static final Map<ResourceKey<Level>, ChunkQueue> QUEUES = new HashMap<>();
@@ -94,9 +95,10 @@ public final class TerraformWaterSystem {
         BlockState water = Blocks.WATER.defaultBlockState();
         boolean allowWaterPlacement = waterLevel > level.getMinBuildHeight();
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        int maxChunksPerTick = allowWaterPlacement ? MAX_CHUNKS_PER_TICK : MAX_DRAIN_CHUNKS_PER_TICK;
         int processedChunks = 0;
 
-        while (processedChunks < MAX_CHUNKS_PER_TICK) {
+        while (processedChunks < maxChunksPerTick) {
             long chunkKey;
             boolean fromPriority;
             if (processedChunks == 0 && queue.hasPriority()) {

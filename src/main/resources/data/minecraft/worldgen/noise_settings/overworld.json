@@ -4,7 +4,10 @@
     "Name": "minecraft:stone"
   },
   "default_fluid": {
-    "Name": "minecraft:air"
+    "Name": "minecraft:water",
+    "Properties": {
+      "level": "0"
+    }
   },
   "disable_mob_generation": false,
   "legacy_random_source": false,
@@ -422,94 +425,6 @@
               "then_run": {
                 "type": "minecraft:sequence",
                 "sequence": [
-                  {
-                    "type": "minecraft:condition",
-                    "if_true": {
-                      "type": "minecraft:biome",
-                      "biome_is": [
-                        "minecraft:river",
-                        "minecraft:frozen_river",
-                        "minecraft:beach",
-                        "minecraft:snowy_beach",
-                        "minecraft:ocean",
-                        "minecraft:deep_ocean",
-                        "minecraft:lukewarm_ocean",
-                        "minecraft:deep_lukewarm_ocean",
-                        "minecraft:cold_ocean",
-                        "minecraft:deep_cold_ocean",
-                        "minecraft:frozen_ocean",
-                        "minecraft:deep_frozen_ocean",
-                        "minecraft:warm_ocean"
-                      ]
-                    },
-                    "then_run": {
-                      "type": "minecraft:condition",
-                      "if_true": {
-                        "type": "minecraft:not",
-                        "invert": {
-                          "type": "minecraft:y_above",
-                          "add_stone_depth": false,
-                          "anchor": {
-                            "absolute": 63
-                          },
-                          "surface_depth_multiplier": 0
-                        }
-                      },
-                      "then_run": {
-                        "type": "minecraft:condition",
-                        "if_true": {
-                          "type": "minecraft:y_above",
-                          "add_stone_depth": false,
-                          "anchor": {
-                            "absolute": 50
-                          },
-                          "surface_depth_multiplier": 0
-                        },
-                        "then_run": {
-                          "type": "minecraft:sequence",
-                          "sequence": [
-                            {
-                              "type": "minecraft:condition",
-                              "if_true": {
-                                "type": "minecraft:biome",
-                                "biome_is": [
-                                  "minecraft:river",
-                                  "minecraft:frozen_river"
-                                ]
-                              },
-                              "then_run": {
-                                "type": "minecraft:block",
-                                "result_state": {
-                                  "Name": "minecraft:clay"
-                                }
-                              }
-                            },
-                            {
-                              "type": "minecraft:condition",
-                              "if_true": {
-                                "type": "minecraft:noise_threshold",
-                                "max_threshold": 0.05,
-                                "min_threshold": -0.05,
-                                "noise": "minecraft:gravel"
-                              },
-                              "then_run": {
-                                "type": "minecraft:block",
-                                "result_state": {
-                                  "Name": "minecraft:gravel"
-                                }
-                              }
-                            },
-                            {
-                              "type": "minecraft:block",
-                              "result_state": {
-                                "Name": "minecraft:sand"
-                              }
-                            }
-                          ]
-                        }
-                      }
-                    }
-                  },
                   {
                     "type": "minecraft:condition",
                     "if_true": {
