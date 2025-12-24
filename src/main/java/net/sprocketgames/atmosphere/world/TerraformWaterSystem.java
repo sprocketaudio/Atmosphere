@@ -130,9 +130,13 @@ public final class TerraformWaterSystem {
             boolean allowWaterPlacement = previousWaterLevel == Integer.MIN_VALUE || waterLevel >= previousWaterLevel;
             int removed = fastDrainChunk(chunk, waterLevel, level);
             int placed = allowWaterPlacement ? fastFillChunk(chunk, waterLevel, level) : 0;
-
             if (LOG_CHUNK_UPDATES && (placed > 0 || removed > 0)) {
-                Atmosphere.LOGGER.debug("Terraform water @ chunk ({}, {}), placed {}, removed {}", chunk.getPos().x, chunk.getPos().z, placed, removed);
+                Atmosphere.LOGGER.debug(
+                        "Terraform water @ chunk ({}, {}), placed {}, removed {}",
+                        chunk.getPos().x,
+                        chunk.getPos().z,
+                        placed,
+                        removed);
             }
 
             boolean wasInitialPass = !work.cleanupOnly;
@@ -185,6 +189,7 @@ public final class TerraformWaterSystem {
                                 section.setBlockState(x, y, z, cleared, false);
                                 cursor.set(worldX, worldY, worldBaseZ + z);
                                 level.getChunkSource().blockChanged(cursor);
+                                level.getChunkSource().getLightEngine().checkBlock(cursor);
                                 removed++;
                                 continue;
                             }
@@ -196,6 +201,7 @@ public final class TerraformWaterSystem {
                             section.setBlockState(x, y, z, air, false);
                             cursor.set(worldX, worldY, worldBaseZ + z);
                             level.getChunkSource().blockChanged(cursor);
+                            level.getChunkSource().getLightEngine().checkBlock(cursor);
                             removed++;
                         }
                     }
@@ -246,6 +252,7 @@ public final class TerraformWaterSystem {
                                 section.setBlockState(x, y, z, water, false);
                                 cursor.set(worldX, worldY, worldBaseZ + z);
                                 level.getChunkSource().blockChanged(cursor);
+                                level.getChunkSource().getLightEngine().checkBlock(cursor);
                                 placed++;
                             }
                         }
@@ -279,6 +286,7 @@ public final class TerraformWaterSystem {
                             section.setBlockState(x, y, z, water, false);
                             cursor.set(worldX, worldY, worldBaseZ + z);
                             level.getChunkSource().blockChanged(cursor);
+                            level.getChunkSource().getLightEngine().checkBlock(cursor);
                             placed++;
                         }
                     }
@@ -294,6 +302,7 @@ public final class TerraformWaterSystem {
 
         return placed;
     }
+
 
     private static void scheduleProcessedNeighborsForCleanup(ChunkQueue queue, TerraformIndexData data, int waterLevel, ChunkPos pos, boolean prioritize) {
         for (int dx = -1; dx <= 1; dx++) {

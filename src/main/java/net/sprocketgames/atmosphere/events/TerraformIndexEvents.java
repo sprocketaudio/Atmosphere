@@ -8,6 +8,7 @@ import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
 import net.sprocketgames.atmosphere.data.TerraformIndexData;
 import net.sprocketgames.atmosphere.network.AtmosphereNetwork;
+import net.sprocketgames.atmosphere.world.TerraformSurfaceSystem;
 import net.sprocketgames.atmosphere.world.TerraformWaterSystem;
 
 public class TerraformIndexEvents {
@@ -33,6 +34,10 @@ public class TerraformIndexEvents {
 
         if (!(event.getChunk() instanceof LevelChunk levelChunk)) {
             return;
+        }
+
+        if (event.isNewChunk()) {
+            TerraformSurfaceSystem.replaceGrassWithDirt(levelChunk, serverLevel);
         }
 
         TerraformWaterSystem.enqueue(serverLevel, levelChunk.getPos());
