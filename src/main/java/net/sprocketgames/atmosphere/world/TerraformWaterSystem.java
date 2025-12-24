@@ -127,7 +127,7 @@ public final class TerraformWaterSystem {
             }
 
             int previousWaterLevel = data.getProcessedWaterLevel(chunkKey);
-            boolean allowWaterPlacement = previousWaterLevel == Integer.MIN_VALUE || waterLevel > previousWaterLevel;
+            boolean allowWaterPlacement = previousWaterLevel == Integer.MIN_VALUE || waterLevel >= previousWaterLevel;
             int removed = fastDrainChunk(chunk, waterLevel, level);
             int placed = allowWaterPlacement ? fastFillChunk(chunk, waterLevel, level) : 0;
 
