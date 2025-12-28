@@ -13,6 +13,7 @@ import net.sprocketgames.atmosphere.events.TerraformIndexEvents;
 import net.sprocketgames.atmosphere.data.TerraformIndexData;
 import net.sprocketgames.atmosphere.commands.TerraformCommands;
 import net.sprocketgames.atmosphere.network.AtmosphereNetwork;
+import net.sprocketgames.atmosphere.world.TerraformSurfaceSystem;
 import net.sprocketgames.atmosphere.world.TerraformWaterSystem;
 
 // The value here should match an entry in the META-INF/neoforge.mods.toml file
@@ -31,6 +32,7 @@ public class Atmosphere {
         NeoForge.EVENT_BUS.addListener(TerraformIndexEvents::onChunkUnload);
         NeoForge.EVENT_BUS.addListener(TerraformCommands::register);
         NeoForge.EVENT_BUS.addListener(TerraformWaterSystem::onLevelTick);
+        NeoForge.EVENT_BUS.addListener(TerraformSurfaceSystem::onLevelTick);
     }
 
     private void onCommonSetup(FMLCommonSetupEvent event) {

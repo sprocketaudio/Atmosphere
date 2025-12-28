@@ -41,6 +41,10 @@ public class TerraformIndexEvents {
         }
 
         TerraformWaterSystem.enqueue(serverLevel, levelChunk.getPos());
+        TerraformSurfaceSystem.enqueue(serverLevel, levelChunk.getPos());
+
+        // Always queue vegetation processing (to either add or remove vegetation)
+        TerraformSurfaceSystem.enqueueVegetation(serverLevel, levelChunk.getPos());
     }
 
     public static void onChunkUnload(ChunkEvent.Unload event) {
@@ -57,5 +61,7 @@ public class TerraformIndexEvents {
         }
 
         TerraformWaterSystem.unload(serverLevel, levelChunk.getPos());
+        TerraformSurfaceSystem.unload(serverLevel, levelChunk.getPos());
+        TerraformSurfaceSystem.unloadVegetation(serverLevel, levelChunk.getPos());
     }
 }
