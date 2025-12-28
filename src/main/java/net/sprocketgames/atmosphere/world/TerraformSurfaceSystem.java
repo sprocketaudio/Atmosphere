@@ -500,6 +500,8 @@ public final class TerraformSurfaceSystem {
 
                     // Search within 10 blocks of heightmap hint (handles stale heightmaps)
                     BlockPos grassPos = null;
+                    BlockPos vegetationPos = null;
+                    BlockState vegetationState = null;
                     int minSearchY = Math.max(level.getMinBuildHeight(), hintY - 10);
                     int maxSearchY = Math.min(level.getMaxBuildHeight() - 1, hintY + 5);
 
@@ -513,6 +515,20 @@ public final class TerraformSurfaceSystem {
                             continue;
                         }
 
+                        // Skip vegetation blocks while searching for ground
+                        if (isVegetation(state)) {
+                            if (vegetationPos == null) {
+                                vegetationPos = pos;
+                                vegetationState = state;
+                            }
+                            continue;
+                        }
+
+                        // Skip snow layers/blocks to find actual ground
+                        if (state.is(Blocks.SNOW) || state.is(Blocks.SNOW_BLOCK)) {
+                            continue;
+                        }
+
                         // Found grass block - this is our target
                         if (state.is(Blocks.GRASS_BLOCK)) {
                             grassPos = pos;
@@ -523,12 +539,39 @@ public final class TerraformSurfaceSystem {
                         break;
                     }
 
-                    // Only process if we found a grass block
+                    // Track vegetation even when no grass block is found
+                    if (vegetationPos != null) {
+                        vegetationFound++;
+                        boolean vegetationIsGrassVeg = vegetationState.is(Blocks.SHORT_GRASS) || vegetationState.is(Blocks.TALL_GRASS) ||
+                            vegetationState.is(Blocks.FERN) || vegetationState.is(Blocks.LARGE_FERN) || vegetationState.is(Blocks.DEAD_BUSH);
+                        boolean vegetationIsFlower = !vegetationIsGrassVeg;
+                        if (vegetationIsGrassVeg) {
+                            grassVegFound++;
+                        }
+                        if (vegetationIsFlower) {
+                            flowerFound++;
+                        }
+
+                        if (!grassVegEnabled && vegetationIsGrassVeg) {
+                            removeVegetationAt(level, chunk, vegetationPos, vegetationState, air);
+                            changed++;
+                            vegetationState = air;
+                        } else if (!flowerVegEnabled && vegetationIsFlower) {
+                            removeVegetationAt(level, chunk, vegetationPos, vegetationState, air);
+                            changed++;
+                            vegetationState = air;
+                        }
+                    }
+
+                    // Only process grass-based vegetation if we found a grass block
                     if (grassPos != null) {
                         grassBlocksFound++;
                         BlockPos abovePos = grassPos.above();
                         // Use level.getBlockState instead of chunk.getBlockState to ensure we read actual world state
                         BlockState above = level.getBlockState(abovePos);
+                        if (vegetationPos != null && vegetationPos.equals(abovePos) && vegetationState != null) {
+                            above = vegetationState;
+                        }
                         if (above.isAir()) {
                             airAboveCount++;
                         }
@@ -538,12 +581,6 @@ public final class TerraformSurfaceSystem {
                                                    above.is(Blocks.FERN) || above.is(Blocks.LARGE_FERN) || above.is(Blocks.DEAD_BUSH);
                         boolean aboveIsFlower = aboveIsVegetation && !aboveIsGrassVeg;
 
-                        if (aboveIsVegetation) {
-                            vegetationFound++;
-                            if (aboveIsGrassVeg) grassVegFound++;
-                            if (aboveIsFlower) flowerFound++;
-                        }
-
                         if (x == 8 && z == 8) {
                             Atmosphere.LOGGER.info("    Center: grassPos={}, above={}, isVeg={}, isGrassVeg={}, isFlower={}, willRemove={}",
                                 grassPos, above.getBlock().getName().getString(), aboveIsVegetation, aboveIsGrassVeg, aboveIsFlower,
@@ -552,12 +589,20 @@ public final class TerraformSurfaceSystem {
 
                         // First priority: Remove unwanted vegetation
                         if (!grassVegEnabled && aboveIsGrassVeg) {
-                            removeVegetationAt(chunk, abovePos, above, air);
+                            removeVegetationAt(level, chunk, abovePos, above, air);
                             changed++;
+                            above = air;
+                            aboveIsVegetation = false;
+                            aboveIsGrassVeg = false;
+                            aboveIsFlower = false;
                         }
                         else if (!flowerVegEnabled && aboveIsFlower) {
-                            removeVegetationAt(chunk, abovePos, above, air);
+                            removeVegetationAt(level, chunk, abovePos, above, air);
                             changed++;
+                            above = air;
+                            aboveIsVegetation = false;
+                            aboveIsGrassVeg = false;
+                            aboveIsFlower = false;
                         }
                         // Second priority: Add vegetation where enabled
                         else if ((grassVegEnabled || flowerVegEnabled) && (above.isAir() || (!flowerVegEnabled && aboveIsFlower))) {
@@ -572,7 +617,7 @@ public final class TerraformSurfaceSystem {
                             if (vegetation != null) {
                                 // Remove existing vegetation if replacing
                                 if (aboveIsVegetation) {
-                                    removeVegetationAt(chunk, abovePos, above, air);
+                                    removeVegetationAt(level, chunk, abovePos, above, air);
                                     changed++;
                                 }
 
@@ -633,7 +678,7 @@ public final class TerraformSurfaceSystem {
         return changed;
     }
 
-    private static void removeVegetationAt(LevelChunk chunk, BlockPos pos, BlockState state, BlockState air) {
+    private static void removeVegetationAt(ServerLevel level, LevelChunk chunk, BlockPos pos, BlockState state, BlockState air) {
         // Use section manipulation like water system
         int sectionIndex = chunk.getSectionIndex(pos.getY());
         if (sectionIndex >= 0 && sectionIndex < chunk.getSectionsCount()) {
@@ -645,13 +690,14 @@ public final class TerraformSurfaceSystem {
                 section.release();
             }
         }
+        level.getChunkSource().blockChanged(pos);
 
         // Remove double-height plants
         if (state.is(Blocks.TALL_GRASS) || state.is(Blocks.LARGE_FERN) ||
             state.is(Blocks.SUNFLOWER) || state.is(Blocks.LILAC) ||
             state.is(Blocks.ROSE_BUSH) || state.is(Blocks.PEONY)) {
             BlockPos aboveAbove = pos.above();
-            BlockState aboveAbove2 = chunk.getBlockState(aboveAbove);
+            BlockState aboveAbove2 = level.getBlockState(aboveAbove);
             if (isVegetation(aboveAbove2)) {
                 int sectionIndex2 = chunk.getSectionIndex(aboveAbove.getY());
                 if (sectionIndex2 >= 0 && sectionIndex2 < chunk.getSectionsCount()) {
@@ -663,6 +709,7 @@ public final class TerraformSurfaceSystem {
                         section2.release();
                     }
                 }
+                level.getChunkSource().blockChanged(aboveAbove);
             }
         }
     }
