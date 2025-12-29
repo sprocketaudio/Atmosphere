@@ -9,7 +9,7 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.neoforged.fml.ModLoadingContext;
-import net.neoforged.neoforge.common.ModConfigSpec;
+import net.neoforged.fml.config.ModConfig;
 import net.neoforged.neoforge.common.NeoForge;
 import net.sprocketgames.atmosphere.events.TerraformIndexEvents;
 import net.sprocketgames.atmosphere.data.TerraformIndexData;
@@ -28,7 +28,7 @@ public class Atmosphere {
         modEventBus.addListener(this::onCommonSetup);
         modEventBus.addListener(AtmosphereNetwork::register);
 
-        ModLoadingContext.get().registerConfig(ModConfigSpec.Type.COMMON, AtmosphereConfig.SPEC);
+        ModLoadingContext.get().getActiveContainer().registerConfig(ModConfig.Type.COMMON, AtmosphereConfig.SPEC);
 
         // Gameplay listeners live on the NeoForge event bus.
         NeoForge.EVENT_BUS.addListener(TerraformIndexEvents::onPlayerLogin);
