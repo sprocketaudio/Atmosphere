@@ -8,8 +8,7 @@ import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
 import net.sprocketgames.atmosphere.data.TerraformIndexData;
 import net.sprocketgames.atmosphere.network.AtmosphereNetwork;
-import net.sprocketgames.atmosphere.world.TerraformSurfaceSystem;
-import net.sprocketgames.atmosphere.world.TerraformWaterSystem;
+import net.sprocketgames.atmosphere.world.TerraformSystem;
 
 public class TerraformIndexEvents {
     public static void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
@@ -37,14 +36,10 @@ public class TerraformIndexEvents {
         }
 
         if (event.isNewChunk()) {
-            TerraformSurfaceSystem.replaceGrassWithDirt(levelChunk, serverLevel);
+            TerraformSystem.replaceGrassWithDirt(levelChunk, serverLevel);
         }
 
-        TerraformWaterSystem.enqueue(serverLevel, levelChunk.getPos());
-        TerraformSurfaceSystem.enqueue(serverLevel, levelChunk.getPos());
-
-        // Always queue vegetation processing (to either add or remove vegetation)
-        TerraformSurfaceSystem.enqueueVegetation(serverLevel, levelChunk.getPos());
+        TerraformSystem.enqueue(serverLevel, levelChunk.getPos());
     }
 
     public static void onChunkUnload(ChunkEvent.Unload event) {
@@ -60,8 +55,6 @@ public class TerraformIndexEvents {
             return;
         }
 
-        TerraformWaterSystem.unload(serverLevel, levelChunk.getPos());
-        TerraformSurfaceSystem.unload(serverLevel, levelChunk.getPos());
-        TerraformSurfaceSystem.unloadVegetation(serverLevel, levelChunk.getPos());
+        TerraformSystem.unload(serverLevel, levelChunk.getPos());
     }
 }

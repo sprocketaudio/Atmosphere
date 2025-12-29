@@ -10,8 +10,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.sprocketgames.atmosphere.data.TerraformIndexData;
-import net.sprocketgames.atmosphere.world.TerraformSurfaceSystem;
-import net.sprocketgames.atmosphere.world.TerraformWaterSystem;
+import net.sprocketgames.atmosphere.world.TerraformSystem;
 
 public final class TerraformCommands {
     private TerraformCommands() {
@@ -41,7 +40,7 @@ public final class TerraformCommands {
                                     ServerLevel overworld = context.getSource().getServer().overworld();
                                     TerraformIndexData data = TerraformIndexData.get(overworld);
                                     data.setWaterLevelY(y);
-                                    TerraformWaterSystem.requeueLoaded(overworld);
+                                    TerraformSystem.requeueLoaded(overworld);
                                     context.getSource().sendSuccess(
                                             () -> Component.literal("Set waterLevelY to " + y), true);
                                     return 1;
@@ -53,7 +52,7 @@ public final class TerraformCommands {
                                     ServerLevel overworld = context.getSource().getServer().overworld();
                                     TerraformIndexData data = TerraformIndexData.get(overworld);
                                     data.setGrassifyEnabled(enabled);
-                                    TerraformSurfaceSystem.requeueLoaded(overworld);
+                                    TerraformSystem.requeueLoaded(overworld);
                                     context.getSource().sendSuccess(
                                             () -> Component.literal("Set grassify to " + enabled), true);
                                     return 1;
@@ -65,7 +64,7 @@ public final class TerraformCommands {
                                     ServerLevel overworld = context.getSource().getServer().overworld();
                                     TerraformIndexData data = TerraformIndexData.get(overworld);
                                     data.setGrassVegetationEnabled(enabled);
-                                    TerraformSurfaceSystem.requeueLoadedVegetation(overworld);
+                                    TerraformSystem.requeueLoaded(overworld);
                                     context.getSource().sendSuccess(
                                             () -> Component.literal("Set grass vegetation to " + enabled), true);
                                     return 1;
@@ -77,7 +76,7 @@ public final class TerraformCommands {
                                     ServerLevel overworld = context.getSource().getServer().overworld();
                                     TerraformIndexData data = TerraformIndexData.get(overworld);
                                     data.setFlowerVegetationEnabled(enabled);
-                                    TerraformSurfaceSystem.requeueLoadedVegetation(overworld);
+                                    TerraformSystem.requeueLoaded(overworld);
                                     context.getSource().sendSuccess(
                                             () -> Component.literal("Set flower vegetation to " + enabled), true);
                                     return 1;
