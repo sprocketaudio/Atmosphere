@@ -27,6 +27,12 @@ public class TerraformIndexData extends SavedData {
     private static final String GRASS_VEGETATION_ENABLED_KEY = "grass_vegetation_enabled";
     private static final String FLOWER_VEGETATION_ENABLED_KEY = "flower_vegetation_enabled";
     private static final String SAPLING_ENABLED_KEY = "sapling_enabled";
+    private static final String AUTO_TERRAFORM_ENABLED_KEY = "auto_terraform_enabled";
+    private static final String WATER_LEVEL_OVERRIDE_KEY = "water_level_override";
+    private static final String GRASSIFY_OVERRIDE_KEY = "grassify_override";
+    private static final String GRASS_VEGETATION_OVERRIDE_KEY = "grass_vegetation_override";
+    private static final String FLOWER_VEGETATION_OVERRIDE_KEY = "flower_vegetation_override";
+    private static final String SAPLING_OVERRIDE_KEY = "sapling_override";
     private static final String VEGETATION_PROCESSED_CHUNK_KEYS = "vegetation_processed_chunk_keys";
     private static final String VEGETATION_PROCESSED_STATES = "vegetation_processed_states";
 
@@ -45,6 +51,12 @@ public class TerraformIndexData extends SavedData {
     private boolean grassVegetationEnabled = false;
     private boolean flowerVegetationEnabled = false;
     private boolean saplingEnabled = false;
+    private boolean autoTerraformEnabled = false;
+    private boolean waterLevelOverride = false;
+    private boolean grassifyOverride = false;
+    private boolean grassVegetationOverride = false;
+    private boolean flowerVegetationOverride = false;
+    private boolean saplingOverride = false;
     private final Long2IntMap processedVegetationStates = new Long2IntOpenHashMap();
     private final it.unimi.dsi.fastutil.longs.Long2LongMap processedStates = new it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap();
 
@@ -111,6 +123,24 @@ public class TerraformIndexData extends SavedData {
         if (tag.contains(SAPLING_ENABLED_KEY)) {
             data.saplingEnabled = tag.getBoolean(SAPLING_ENABLED_KEY);
         }
+        if (tag.contains(AUTO_TERRAFORM_ENABLED_KEY)) {
+            data.autoTerraformEnabled = tag.getBoolean(AUTO_TERRAFORM_ENABLED_KEY);
+        }
+        if (tag.contains(WATER_LEVEL_OVERRIDE_KEY)) {
+            data.waterLevelOverride = tag.getBoolean(WATER_LEVEL_OVERRIDE_KEY);
+        }
+        if (tag.contains(GRASSIFY_OVERRIDE_KEY)) {
+            data.grassifyOverride = tag.getBoolean(GRASSIFY_OVERRIDE_KEY);
+        }
+        if (tag.contains(GRASS_VEGETATION_OVERRIDE_KEY)) {
+            data.grassVegetationOverride = tag.getBoolean(GRASS_VEGETATION_OVERRIDE_KEY);
+        }
+        if (tag.contains(FLOWER_VEGETATION_OVERRIDE_KEY)) {
+            data.flowerVegetationOverride = tag.getBoolean(FLOWER_VEGETATION_OVERRIDE_KEY);
+        }
+        if (tag.contains(SAPLING_OVERRIDE_KEY)) {
+            data.saplingOverride = tag.getBoolean(SAPLING_OVERRIDE_KEY);
+        }
 
         return data;
     }
@@ -124,6 +154,12 @@ public class TerraformIndexData extends SavedData {
         tag.putBoolean(GRASS_VEGETATION_ENABLED_KEY, grassVegetationEnabled);
         tag.putBoolean(FLOWER_VEGETATION_ENABLED_KEY, flowerVegetationEnabled);
         tag.putBoolean(SAPLING_ENABLED_KEY, saplingEnabled);
+        tag.putBoolean(AUTO_TERRAFORM_ENABLED_KEY, autoTerraformEnabled);
+        tag.putBoolean(WATER_LEVEL_OVERRIDE_KEY, waterLevelOverride);
+        tag.putBoolean(GRASSIFY_OVERRIDE_KEY, grassifyOverride);
+        tag.putBoolean(GRASS_VEGETATION_OVERRIDE_KEY, grassVegetationOverride);
+        tag.putBoolean(FLOWER_VEGETATION_OVERRIDE_KEY, flowerVegetationOverride);
+        tag.putBoolean(SAPLING_OVERRIDE_KEY, saplingOverride);
 
         long[] keys = new long[processedStates.size()];
         long[] values = new long[keys.length];
@@ -263,6 +299,99 @@ public class TerraformIndexData extends SavedData {
     public void setSaplingEnabled(boolean saplingEnabled) {
         if (this.saplingEnabled != saplingEnabled) {
             this.saplingEnabled = saplingEnabled;
+            setDirty();
+        }
+    }
+
+    public boolean isAutoTerraformEnabled() {
+        return autoTerraformEnabled;
+    }
+
+    public void setAutoTerraformEnabled(boolean autoTerraformEnabled) {
+        if (this.autoTerraformEnabled != autoTerraformEnabled) {
+            this.autoTerraformEnabled = autoTerraformEnabled;
+            setDirty();
+        }
+    }
+
+    public boolean isWaterLevelOverridden() {
+        return waterLevelOverride;
+    }
+
+    public void setWaterLevelOverride(boolean waterLevelOverride) {
+        if (this.waterLevelOverride != waterLevelOverride) {
+            this.waterLevelOverride = waterLevelOverride;
+            setDirty();
+        }
+    }
+
+    public boolean isGrassifyOverridden() {
+        return grassifyOverride;
+    }
+
+    public void setGrassifyOverride(boolean grassifyOverride) {
+        if (this.grassifyOverride != grassifyOverride) {
+            this.grassifyOverride = grassifyOverride;
+            setDirty();
+        }
+    }
+
+    public boolean isGrassVegetationOverridden() {
+        return grassVegetationOverride;
+    }
+
+    public void setGrassVegetationOverride(boolean grassVegetationOverride) {
+        if (this.grassVegetationOverride != grassVegetationOverride) {
+            this.grassVegetationOverride = grassVegetationOverride;
+            setDirty();
+        }
+    }
+
+    public boolean isFlowerVegetationOverridden() {
+        return flowerVegetationOverride;
+    }
+
+    public void setFlowerVegetationOverride(boolean flowerVegetationOverride) {
+        if (this.flowerVegetationOverride != flowerVegetationOverride) {
+            this.flowerVegetationOverride = flowerVegetationOverride;
+            setDirty();
+        }
+    }
+
+    public boolean isSaplingOverridden() {
+        return saplingOverride;
+    }
+
+    public void setSaplingOverride(boolean saplingOverride) {
+        if (this.saplingOverride != saplingOverride) {
+            this.saplingOverride = saplingOverride;
+            setDirty();
+        }
+    }
+
+    public void clearOverrides() {
+        boolean changed = false;
+        if (waterLevelOverride) {
+            waterLevelOverride = false;
+            changed = true;
+        }
+        if (grassifyOverride) {
+            grassifyOverride = false;
+            changed = true;
+        }
+        if (grassVegetationOverride) {
+            grassVegetationOverride = false;
+            changed = true;
+        }
+        if (flowerVegetationOverride) {
+            flowerVegetationOverride = false;
+            changed = true;
+        }
+        if (saplingOverride) {
+            saplingOverride = false;
+            changed = true;
+        }
+        if (changed) {
             setDirty();
         }
     }

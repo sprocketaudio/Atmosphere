@@ -1,6 +1,7 @@
 package net.sprocketgames.atmosphere.network;
 
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.level.ServerLevel;
 import net.neoforged.fml.loading.FMLEnvironment;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
@@ -33,5 +34,11 @@ public final class AtmosphereNetwork {
 
     public static void sendTerraformIndex(ServerPlayer player, long terraformIndex) {
         PacketDistributor.sendToPlayer(player, new TerraformIndexSyncPayload(terraformIndex));
+    }
+
+    public static void sendTerraformIndex(ServerLevel level, long terraformIndex) {
+        for (ServerPlayer player : level.players()) {
+            sendTerraformIndex(player, terraformIndex);
+        }
     }
 }
