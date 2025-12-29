@@ -71,7 +71,6 @@ public final class TerraformSystem {
             queue.ensureTask(chunkKey);
         }
 
-        scheduleProcessedNeighborsForCleanup(queue, data, waterLevel, pos, true);
     }
 
     public static void unload(ServerLevel level, ChunkPos pos) {
@@ -194,7 +193,7 @@ public final class TerraformSystem {
                 continue;
             }
 
-            boolean waterNeeded = work.cleanupOnly || !data.isChunkWaterProcessed(chunkKey, waterLevel);
+            boolean waterNeeded = !data.isChunkWaterProcessed(chunkKey, waterLevel);
             boolean grassNeeded = !data.isChunkGrassProcessed(chunkKey, grassifyEnabled);
             boolean vegetationNeeded = !data.isChunkVegetationProcessed(chunkKey, grassVegEnabled, flowerVegEnabled);
             boolean processedWater = false;
@@ -217,11 +216,7 @@ public final class TerraformSystem {
                 removed = fastDrainChunk(chunk, waterLevel, level);
                 placed = allowWaterPlacement ? fastFillChunk(chunk, waterLevel, level) : 0;
                 processedWater = true;
-                boolean wasInitialPass = !work.cleanupOnly;
                 data.markChunkWaterProcessed(chunkKey, waterLevel);
-                if (wasInitialPass) {
-                    scheduleProcessedNeighborsForCleanup(queue, data, waterLevel, work.pos, true);
-                }
             }
 
             if (grassNeeded) {
@@ -256,9 +251,6 @@ public final class TerraformSystem {
                         .append(placed)
                         .append(" removed=")
                         .append(removed);
-                    if (work.cleanupOnly) {
-                        waterSummary.append(" cleanup-only");
-                    }
                     summaries.add(waterSummary.toString());
                 }
                 if (processedGrass) {
@@ -435,28 +427,6 @@ public final class TerraformSystem {
         return placed;
     }
 
-    private static void scheduleProcessedNeighborsForCleanup(ChunkQueue queue, TerraformIndexData data, int waterLevel, ChunkPos pos, boolean prioritize) {
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dz = -1; dz <= 1; dz++) {
-                if (dx == 0 && dz == 0) {
-                    continue;
-                }
-
-                long neighborKey = ChunkPos.asLong(pos.x + dx, pos.z + dz);
-                if (queue.isLoaded(neighborKey) && data.isChunkWaterProcessed(neighborKey, waterLevel)) {
-                    if (!queue.hasTask(neighborKey)) {
-                        queue.ensureTask(neighborKey, true);
-                    } else {
-                        queue.flagCleanup(neighborKey);
-                    }
-                    if (prioritize) {
-                        queue.prioritize(neighborKey);
-                    }
-                }
-            }
-        }
-    }
-
     private static void prioritizePlayerChunks(ServerLevel level, ChunkQueue queue, TerraformIndexData data, int waterLevel,
                                                boolean grassifyEnabled, boolean grassVegEnabled, boolean flowerVegEnabled) {
         for (ServerPlayer player : level.players()) {
@@ -467,12 +437,10 @@ public final class TerraformSystem {
                     long chunkKey = nearby.toLong();
                     if (needsProcessing(data, chunkKey, waterLevel, grassifyEnabled, grassVegEnabled, flowerVegEnabled)) {
                         queue.markLoaded(chunkKey);
-                        if (queue.hasTask(chunkKey)) {
-                            queue.prioritize(chunkKey);
-                        } else {
-                            queue.ensureTask(chunkKey, false);
-                            queue.prioritize(chunkKey);
+                        if (!queue.hasTask(chunkKey)) {
+                            queue.ensureTask(chunkKey);
                         }
+                        queue.prioritize(chunkKey);
                     }
                 }
             }
@@ -1011,16 +979,10 @@ public final class TerraformSystem {
         }
 
         void ensureTask(long chunkKey) {
-            ensureTask(chunkKey, false);
-        }
-
-        void ensureTask(long chunkKey, boolean cleanupOnly) {
             ChunkWork work = tasks.get(chunkKey);
             if (work == null) {
-                tasks.put(chunkKey, new ChunkWork(ChunkPos.getX(chunkKey), ChunkPos.getZ(chunkKey), cleanupOnly));
+                tasks.put(chunkKey, new ChunkWork(ChunkPos.getX(chunkKey), ChunkPos.getZ(chunkKey)));
                 normalOrder.add(chunkKey);
-            } else if (cleanupOnly && !work.cleanupOnly) {
-                work.cleanupOnly = true;
             }
         }
 
@@ -1042,7 +1004,7 @@ public final class TerraformSystem {
             priorityOrder.clear();
             normalOrder.clear();
             for (long chunkKey : loaded) {
-                ensureTask(chunkKey, false);
+                ensureTask(chunkKey);
             }
         }
 
@@ -1071,13 +1033,6 @@ public final class TerraformSystem {
                 } else {
                     priorityOrder.addFirst(chunkKey);
                 }
-            }
-        }
-
-        void flagCleanup(long chunkKey) {
-            ChunkWork work = tasks.get(chunkKey);
-            if (work != null) {
-                work.cleanupOnly = true;
             }
         }
 
@@ -1125,11 +1080,9 @@ public final class TerraformSystem {
 
     private static final class ChunkWork {
         final ChunkPos pos;
-        boolean cleanupOnly;
 
-        ChunkWork(int chunkX, int chunkZ, boolean cleanupOnly) {
+        ChunkWork(int chunkX, int chunkZ) {
             this.pos = new ChunkPos(chunkX, chunkZ);
-            this.cleanupOnly = cleanupOnly;
         }
     }
 }
