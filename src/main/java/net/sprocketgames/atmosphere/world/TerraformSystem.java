@@ -280,37 +280,39 @@ public final class TerraformSystem {
                 data.markChunkVegetationProcessed(chunkKey, grassVegEnabled, flowerVegEnabled);
             }
 
-            List<String> summaries = new ArrayList<>();
-            if (processedWater) {
-                StringBuilder waterSummary = new StringBuilder("water placed=")
-                    .append(placed)
-                    .append(" removed=")
-                    .append(removed);
-                if (work.cleanupOnly) {
-                    waterSummary.append(" cleanup-only");
+            if (debugLogging) {
+                List<String> summaries = new ArrayList<>();
+                if (processedWater) {
+                    StringBuilder waterSummary = new StringBuilder("water placed=")
+                        .append(placed)
+                        .append(" removed=")
+                        .append(removed);
+                    if (work.cleanupOnly) {
+                        waterSummary.append(" cleanup-only");
+                    }
+                    summaries.add(waterSummary.toString());
                 }
-                summaries.add(waterSummary.toString());
-            }
-            if (processedGrass) {
-                summaries.add(String.format("surface %s=%d",
-                    grassifyEnabled ? "dirt->grass" : "grass->dirt",
-                    surfaceChanged));
-            }
-            if (processedVegetation) {
-                String vegetationSummary = String.format(
-                    "vegetation %s=%d (grass=%d, flowers=%d)",
-                    (grassVegEnabled || flowerVegEnabled) ? "updated" : "removed",
-                    vegetationResult.changed,
-                    vegetationResult.grassChanged,
-                    vegetationResult.flowerChanged);
-                summaries.add(vegetationSummary);
-            }
-            if (!summaries.isEmpty()) {
-                Atmosphere.LOGGER.info(
-                    "Terraform chunk ({}, {}): {}",
-                    chunk.getPos().x,
-                    chunk.getPos().z,
-                    String.join(", ", summaries));
+                if (processedGrass) {
+                    summaries.add(String.format("surface %s=%d",
+                        grassifyEnabled ? "dirt->grass" : "grass->dirt",
+                        surfaceChanged));
+                }
+                if (processedVegetation) {
+                    String vegetationSummary = String.format(
+                        "vegetation %s=%d (grass=%d, flowers=%d)",
+                        (grassVegEnabled || flowerVegEnabled) ? "updated" : "removed",
+                        vegetationResult.changed,
+                        vegetationResult.grassChanged,
+                        vegetationResult.flowerChanged);
+                    summaries.add(vegetationSummary);
+                }
+                if (!summaries.isEmpty()) {
+                    Atmosphere.LOGGER.info(
+                        "Terraform chunk ({}, {}): {}",
+                        chunk.getPos().x,
+                        chunk.getPos().z,
+                        String.join(", ", summaries));
+                }
             }
 
             queue.finish(chunkKey);
