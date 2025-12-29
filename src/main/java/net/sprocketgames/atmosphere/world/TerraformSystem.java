@@ -204,7 +204,7 @@ public final class TerraformSystem {
             int placed = 0;
             int removed = 0;
             int surfaceChanged = 0;
-            int vegetationChanged = 0;
+            VegetationResult vegetationResult = new VegetationResult(0, 0, 0);
 
             if (!waterNeeded && !grassNeeded && !vegetationNeeded) {
                 queue.finish(chunkKey);
@@ -262,17 +262,19 @@ public final class TerraformSystem {
             }
 
             if (vegetationNeeded) {
-                int changed = processVegetationInChunk(chunk, level, grassVegEnabled, flowerVegEnabled);
-                vegetationChanged = changed;
+                VegetationResult result = processVegetationInChunk(chunk, level, grassVegEnabled, flowerVegEnabled);
+                vegetationResult = result;
                 processedVegetation = true;
 
-                if (debugLogging && changed > 0) {
+                if (debugLogging && result.changed > 0) {
                     Atmosphere.LOGGER.debug(
-                            "Terraform vegetation @ chunk ({}, {}), {} plants {}",
+                            "Terraform vegetation @ chunk ({}, {}), {} plants {} (grass={}, flowers={})",
                             chunk.getPos().x,
                             chunk.getPos().z,
-                            changed,
-                            (grassVegEnabled && flowerVegEnabled) ? "added" : (grassVegEnabled || flowerVegEnabled) ? "added" : "removed");
+                            result.changed,
+                            (grassVegEnabled && flowerVegEnabled) ? "added" : (grassVegEnabled || flowerVegEnabled) ? "added" : "removed",
+                            result.grassChanged,
+                            result.flowerChanged);
                 }
 
                 data.markChunkVegetationProcessed(chunkKey, grassVegEnabled, flowerVegEnabled);
@@ -295,9 +297,13 @@ public final class TerraformSystem {
                     surfaceChanged));
             }
             if (processedVegetation) {
-                summaries.add(String.format("vegetation %s=%d",
+                String vegetationSummary = String.format(
+                    "vegetation %s=%d (grass=%d, flowers=%d)",
                     (grassVegEnabled || flowerVegEnabled) ? "updated" : "removed",
-                    vegetationChanged));
+                    vegetationResult.changed,
+                    vegetationResult.grassChanged,
+                    vegetationResult.flowerChanged);
+                summaries.add(vegetationSummary);
             }
             if (!summaries.isEmpty()) {
                 Atmosphere.LOGGER.info(
@@ -630,8 +636,10 @@ public final class TerraformSystem {
         return changed;
     }
 
-    private static int processVegetationInChunk(LevelChunk chunk, ServerLevel level, boolean grassVegEnabled, boolean flowerVegEnabled) {
+    private static VegetationResult processVegetationInChunk(LevelChunk chunk, ServerLevel level, boolean grassVegEnabled, boolean flowerVegEnabled) {
         int changed = 0;
+        int grassChanged = 0;
+        int flowerChanged = 0;
         boolean debugLogging = AtmosphereConfig.DEBUG_LOGGING.get();
         java.util.Random random = new java.util.Random();
         BlockState air = Blocks.AIR.defaultBlockState();
@@ -723,8 +731,7 @@ public final class TerraformSystem {
                     // Track vegetation even when no grass block is found
                     if (vegetationPos != null) {
                         vegetationFound++;
-                        boolean vegetationIsGrassVeg = vegetationState.is(Blocks.SHORT_GRASS) || vegetationState.is(Blocks.TALL_GRASS) ||
-                            vegetationState.is(Blocks.FERN) || vegetationState.is(Blocks.LARGE_FERN) || vegetationState.is(Blocks.DEAD_BUSH);
+                        boolean vegetationIsGrassVeg = isGrassVegetation(vegetationState);
                         boolean vegetationIsFlower = !vegetationIsGrassVeg;
                         if (vegetationIsGrassVeg) {
                             grassVegFound++;
@@ -736,10 +743,12 @@ public final class TerraformSystem {
                         if (!grassVegEnabled && vegetationIsGrassVeg) {
                             removeVegetationAt(level, chunk, vegetationPos, vegetationState, air);
                             changed++;
+                            grassChanged++;
                             vegetationState = air;
                         } else if (!flowerVegEnabled && vegetationIsFlower) {
                             removeVegetationAt(level, chunk, vegetationPos, vegetationState, air);
                             changed++;
+                            flowerChanged++;
                             vegetationState = air;
                         }
                     }
@@ -758,8 +767,7 @@ public final class TerraformSystem {
                         }
 
                         boolean aboveIsVegetation = isVegetation(above);
-                        boolean aboveIsGrassVeg = above.is(Blocks.SHORT_GRASS) || above.is(Blocks.TALL_GRASS) ||
-                                                   above.is(Blocks.FERN) || above.is(Blocks.LARGE_FERN) || above.is(Blocks.DEAD_BUSH);
+                        boolean aboveIsGrassVeg = isGrassVegetation(above);
                         boolean aboveIsFlower = aboveIsVegetation && !aboveIsGrassVeg;
 
                         if (debugLogging && x == 8 && z == 8) {
@@ -772,6 +780,7 @@ public final class TerraformSystem {
                         if (!grassVegEnabled && aboveIsGrassVeg) {
                             removeVegetationAt(level, chunk, abovePos, above, air);
                             changed++;
+                            grassChanged++;
                             above = air;
                             aboveIsVegetation = false;
                             aboveIsGrassVeg = false;
@@ -780,6 +789,7 @@ public final class TerraformSystem {
                         else if (!flowerVegEnabled && aboveIsFlower) {
                             removeVegetationAt(level, chunk, abovePos, above, air);
                             changed++;
+                            flowerChanged++;
                             above = air;
                             aboveIsVegetation = false;
                             aboveIsGrassVeg = false;
@@ -800,6 +810,11 @@ public final class TerraformSystem {
                                 if (aboveIsVegetation) {
                                     removeVegetationAt(level, chunk, abovePos, above, air);
                                     changed++;
+                                    if (aboveIsGrassVeg) {
+                                        grassChanged++;
+                                    } else if (aboveIsFlower) {
+                                        flowerChanged++;
+                                    }
                                 }
 
                                 // Use the same approach as water system - direct section manipulation
@@ -811,16 +826,21 @@ public final class TerraformSystem {
                                         int localX = abovePos.getX() & 15;
                                         int localY = abovePos.getY() & 15;
                                         int localZ = abovePos.getZ() & 15;
-                                        section.setBlockState(localX, localY, localZ, vegetation, false);
-                                    } finally {
-                                        section.release();
-                                    }
-                                    level.getChunkSource().blockChanged(abovePos);
-                                    changed++;
+                                    section.setBlockState(localX, localY, localZ, vegetation, false);
+                                } finally {
+                                    section.release();
+                                }
+                                level.getChunkSource().blockChanged(abovePos);
+                                changed++;
+                                if (isGrassVegetation(vegetation)) {
+                                    grassChanged++;
+                                } else {
+                                    flowerChanged++;
+                                }
 
-                                    // Handle double-height plants
-                                    if (vegetation.is(Blocks.TALL_GRASS) || vegetation.is(Blocks.LARGE_FERN) ||
-                                        vegetation.is(Blocks.SUNFLOWER) || vegetation.is(Blocks.LILAC) ||
+                                // Handle double-height plants
+                                if (vegetation.is(Blocks.TALL_GRASS) || vegetation.is(Blocks.LARGE_FERN) ||
+                                    vegetation.is(Blocks.SUNFLOWER) || vegetation.is(Blocks.LILAC) ||
                                         vegetation.is(Blocks.ROSE_BUSH) || vegetation.is(Blocks.PEONY)) {
                                         BlockPos aboveAbove = abovePos.above();
                                         int sectionIndex2 = chunk.getSectionIndex(aboveAbove.getY());
@@ -858,7 +878,7 @@ public final class TerraformSystem {
             chunk.setUnsaved(true);
         }
 
-        return changed;
+        return new VegetationResult(changed, grassChanged, flowerChanged);
     }
 
     private static void removeVegetationAt(ServerLevel level, LevelChunk chunk, BlockPos pos, BlockState state, BlockState air) {
@@ -915,6 +935,12 @@ public final class TerraformSystem {
                // Double-height flowers
                state.is(Blocks.SUNFLOWER) || state.is(Blocks.LILAC) ||
                state.is(Blocks.ROSE_BUSH) || state.is(Blocks.PEONY);
+    }
+
+    private static boolean isGrassVegetation(BlockState state) {
+        return state.is(Blocks.SHORT_GRASS) || state.is(Blocks.TALL_GRASS) ||
+               state.is(Blocks.FERN) || state.is(Blocks.LARGE_FERN) ||
+               state.is(Blocks.DEAD_BUSH);
     }
 
     /**
@@ -1165,6 +1191,18 @@ public final class TerraformSystem {
 
         boolean hasTask(long chunkKey) {
             return tasks.containsKey(chunkKey);
+        }
+    }
+
+    private static final class VegetationResult {
+        private final int changed;
+        private final int grassChanged;
+        private final int flowerChanged;
+
+        private VegetationResult(int changed, int grassChanged, int flowerChanged) {
+            this.changed = changed;
+            this.grassChanged = grassChanged;
+            this.flowerChanged = flowerChanged;
         }
     }
 
