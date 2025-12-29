@@ -26,12 +26,14 @@ public class TerraformIndexData extends SavedData {
     private static final String GRASS_PROCESSED_STATES = "grass_processed_states";
     private static final String GRASS_VEGETATION_ENABLED_KEY = "grass_vegetation_enabled";
     private static final String FLOWER_VEGETATION_ENABLED_KEY = "flower_vegetation_enabled";
+    private static final String SAPLING_ENABLED_KEY = "sapling_enabled";
     private static final String VEGETATION_PROCESSED_CHUNK_KEYS = "vegetation_processed_chunk_keys";
     private static final String VEGETATION_PROCESSED_STATES = "vegetation_processed_states";
 
     private static final int FEATURE_GRASS = 1;
     private static final int FEATURE_GRASS_VEGETATION = 2;
     private static final int FEATURE_FLOWER_VEGETATION = 4;
+    private static final int FEATURE_SAPLINGS = 8;
     private static final int FEATURE_MASK_BITS = 16;
 
     private long terraformIndex;
@@ -42,6 +44,7 @@ public class TerraformIndexData extends SavedData {
     private final Long2IntMap processedGrassStates = new Long2IntOpenHashMap();
     private boolean grassVegetationEnabled = false;
     private boolean flowerVegetationEnabled = false;
+    private boolean saplingEnabled = false;
     private final Long2IntMap processedVegetationStates = new Long2IntOpenHashMap();
     private final it.unimi.dsi.fastutil.longs.Long2LongMap processedStates = new it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap();
 
@@ -105,6 +108,9 @@ public class TerraformIndexData extends SavedData {
         if (tag.contains(FLOWER_VEGETATION_ENABLED_KEY)) {
             data.flowerVegetationEnabled = tag.getBoolean(FLOWER_VEGETATION_ENABLED_KEY);
         }
+        if (tag.contains(SAPLING_ENABLED_KEY)) {
+            data.saplingEnabled = tag.getBoolean(SAPLING_ENABLED_KEY);
+        }
 
         return data;
     }
@@ -117,6 +123,7 @@ public class TerraformIndexData extends SavedData {
         tag.putBoolean(GRASSIFY_ENABLED_KEY, grassifyEnabled);
         tag.putBoolean(GRASS_VEGETATION_ENABLED_KEY, grassVegetationEnabled);
         tag.putBoolean(FLOWER_VEGETATION_ENABLED_KEY, flowerVegetationEnabled);
+        tag.putBoolean(SAPLING_ENABLED_KEY, saplingEnabled);
 
         long[] keys = new long[processedStates.size()];
         long[] values = new long[keys.length];
@@ -249,6 +256,17 @@ public class TerraformIndexData extends SavedData {
         }
     }
 
+    public boolean isSaplingEnabled() {
+        return saplingEnabled;
+    }
+
+    public void setSaplingEnabled(boolean saplingEnabled) {
+        if (this.saplingEnabled != saplingEnabled) {
+            this.saplingEnabled = saplingEnabled;
+            setDirty();
+        }
+    }
+
     public boolean isChunkVegetationProcessed(long chunkKey, boolean grassVegEnabled, boolean flowerVegEnabled) {
         long state = processedStates.get(chunkKey);
         if (state == Long.MIN_VALUE) {
@@ -287,6 +305,30 @@ public class TerraformIndexData extends SavedData {
             return false;
         }
         return extractWaterLevel(state) == waterLevel;
+    }
+
+    public boolean isChunkSaplingProcessed(long chunkKey, boolean saplingEnabled) {
+        long state = processedStates.get(chunkKey);
+        if (state == Long.MIN_VALUE) {
+            return false;
+        }
+        int processedMask = extractProcessedMask(state);
+        int enabledMask = extractEnabledMask(state);
+        return isFeatureStateProcessed(processedMask, enabledMask, FEATURE_SAPLINGS, saplingEnabled);
+    }
+
+    public void markChunkSaplingProcessed(long chunkKey, boolean saplingEnabled) {
+        long state = processedStates.get(chunkKey);
+        int waterLevel = state == Long.MIN_VALUE ? Integer.MIN_VALUE : extractWaterLevel(state);
+        int processedMask = state == Long.MIN_VALUE ? 0 : extractProcessedMask(state);
+        int enabledMask = state == Long.MIN_VALUE ? 0 : extractEnabledMask(state);
+        processedMask |= FEATURE_SAPLINGS;
+        if (saplingEnabled) {
+            enabledMask |= FEATURE_SAPLINGS;
+        } else {
+            enabledMask &= ~FEATURE_SAPLINGS;
+        }
+        setState(chunkKey, waterLevel, processedMask, enabledMask);
     }
 
     public void markChunkWaterProcessed(long chunkKey, int waterLevel) {

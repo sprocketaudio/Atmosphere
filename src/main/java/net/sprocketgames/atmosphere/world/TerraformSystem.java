@@ -61,10 +61,11 @@ public final class TerraformSystem {
         boolean grassifyEnabled = data.isGrassifyEnabled();
         boolean grassVegEnabled = data.isGrassVegetationEnabled();
         boolean flowerVegEnabled = data.isFlowerVegetationEnabled();
+        boolean saplingEnabled = data.isSaplingEnabled();
         long chunkKey = pos.toLong();
 
         queue.markLoaded(chunkKey);
-        if (needsProcessing(data, chunkKey, waterLevel, grassifyEnabled, grassVegEnabled, flowerVegEnabled)) {
+        if (needsProcessing(data, chunkKey, waterLevel, grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
             queue.ensureTask(chunkKey);
             queue.prioritize(chunkKey);
         } else if (!queue.hasTask(chunkKey)) {
@@ -138,10 +139,12 @@ public final class TerraformSystem {
     }
 
     private static boolean needsProcessing(TerraformIndexData data, long chunkKey, int waterLevel,
-                                           boolean grassifyEnabled, boolean grassVegEnabled, boolean flowerVegEnabled) {
+                                           boolean grassifyEnabled, boolean grassVegEnabled, boolean flowerVegEnabled,
+                                           boolean saplingEnabled) {
         return !data.isChunkWaterProcessed(chunkKey, waterLevel)
             || !data.isChunkGrassProcessed(chunkKey, grassifyEnabled)
-            || !data.isChunkVegetationProcessed(chunkKey, grassVegEnabled, flowerVegEnabled);
+            || !data.isChunkVegetationProcessed(chunkKey, grassVegEnabled, flowerVegEnabled)
+            || !data.isChunkSaplingProcessed(chunkKey, saplingEnabled);
     }
 
     private static void processQueue(ServerLevel level) {
@@ -151,8 +154,9 @@ public final class TerraformSystem {
         boolean grassifyEnabled = data.isGrassifyEnabled();
         boolean grassVegEnabled = data.isGrassVegetationEnabled();
         boolean flowerVegEnabled = data.isFlowerVegetationEnabled();
+        boolean saplingEnabled = data.isSaplingEnabled();
 
-        prioritizePlayerChunks(level, queue, data, waterLevel, grassifyEnabled, grassVegEnabled, flowerVegEnabled);
+        prioritizePlayerChunks(level, queue, data, waterLevel, grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled);
 
         if (queue.isEmpty()) {
             return;
@@ -196,15 +200,18 @@ public final class TerraformSystem {
             boolean waterNeeded = !data.isChunkWaterProcessed(chunkKey, waterLevel);
             boolean grassNeeded = !data.isChunkGrassProcessed(chunkKey, grassifyEnabled);
             boolean vegetationNeeded = !data.isChunkVegetationProcessed(chunkKey, grassVegEnabled, flowerVegEnabled);
+            boolean saplingNeeded = !data.isChunkSaplingProcessed(chunkKey, saplingEnabled);
             boolean processedWater = false;
             boolean processedGrass = false;
             boolean processedVegetation = false;
+            boolean processedSaplings = false;
             int placed = 0;
             int removed = 0;
             int surfaceChanged = 0;
             VegetationResult vegetationResult = new VegetationResult(0, 0, 0);
+            SaplingResult saplingResult = new SaplingResult(0, 0, 0);
 
-            if (!waterNeeded && !grassNeeded && !vegetationNeeded) {
+            if (!waterNeeded && !grassNeeded && !vegetationNeeded && !saplingNeeded) {
                 queue.finish(chunkKey);
                 processedChunks++;
                 continue;
@@ -244,6 +251,14 @@ public final class TerraformSystem {
                 data.markChunkVegetationProcessed(chunkKey, grassVegEnabled, flowerVegEnabled);
             }
 
+            if (saplingNeeded) {
+                SaplingResult result = processSaplingsInChunk(chunk, level, saplingEnabled);
+                saplingResult = result;
+                processedSaplings = true;
+
+                data.markChunkSaplingProcessed(chunkKey, saplingEnabled);
+            }
+
             if (AtmosphereConfig.DEBUG_LOGGING.get()) {
                 List<String> summaries = new ArrayList<>();
                 if (processedWater) {
@@ -266,6 +281,15 @@ public final class TerraformSystem {
                         vegetationResult.grassChanged,
                         vegetationResult.flowerChanged);
                     summaries.add(vegetationSummary);
+                }
+                if (processedSaplings) {
+                    String saplingSummary = String.format(
+                        "saplings %s=%d (placed=%d, removed=%d)",
+                        saplingEnabled ? "updated" : "removed",
+                        saplingResult.changed,
+                        saplingResult.placed,
+                        saplingResult.removed);
+                    summaries.add(saplingSummary);
                 }
                 if (!summaries.isEmpty()) {
                     Atmosphere.LOGGER.info(
@@ -428,14 +452,15 @@ public final class TerraformSystem {
     }
 
     private static void prioritizePlayerChunks(ServerLevel level, ChunkQueue queue, TerraformIndexData data, int waterLevel,
-                                               boolean grassifyEnabled, boolean grassVegEnabled, boolean flowerVegEnabled) {
+                                               boolean grassifyEnabled, boolean grassVegEnabled, boolean flowerVegEnabled,
+                                               boolean saplingEnabled) {
         for (ServerPlayer player : level.players()) {
             ChunkPos playerChunk = player.chunkPosition();
             for (int dx = -PLAYER_PRIORITY_RADIUS; dx <= PLAYER_PRIORITY_RADIUS; dx++) {
                 for (int dz = -PLAYER_PRIORITY_RADIUS; dz <= PLAYER_PRIORITY_RADIUS; dz++) {
                     ChunkPos nearby = new ChunkPos(playerChunk.x + dx, playerChunk.z + dz);
                     long chunkKey = nearby.toLong();
-                    if (needsProcessing(data, chunkKey, waterLevel, grassifyEnabled, grassVegEnabled, flowerVegEnabled)) {
+                    if (needsProcessing(data, chunkKey, waterLevel, grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
                         queue.markLoaded(chunkKey);
                         if (!queue.hasTask(chunkKey)) {
                             queue.ensureTask(chunkKey);
@@ -766,6 +791,167 @@ public final class TerraformSystem {
         return new VegetationResult(changed, grassChanged, flowerChanged);
     }
 
+    private static SaplingResult processSaplingsInChunk(LevelChunk chunk, ServerLevel level, boolean saplingEnabled) {
+        int changed = 0;
+        int placed = 0;
+        int removed = 0;
+        java.util.Random random = new java.util.Random();
+        BlockState air = Blocks.AIR.defaultBlockState();
+
+        int worldBaseX = chunk.getPos().getMinBlockX();
+        int worldBaseZ = chunk.getPos().getMinBlockZ();
+
+        try {
+            for (int x = 0; x < 16; x++) {
+                int worldX = worldBaseX + x;
+                for (int z = 0; z < 16; z++) {
+                    int worldZ = worldBaseZ + z;
+                    int hintY = chunk.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.OCEAN_FLOOR, x, z);
+                    BlockPos grassPos = null;
+                    BlockPos saplingPos = null;
+                    BlockState saplingState = null;
+                    BlockPos vegetationPos = null;
+                    BlockState vegetationState = null;
+                    int minSearchY = Math.max(level.getMinBuildHeight(), hintY - 10);
+                    int maxSearchY = Math.min(level.getMaxBuildHeight() - 1, hintY + 5);
+
+                    for (int y = maxSearchY; y >= minSearchY; y--) {
+                        BlockPos pos = new BlockPos(worldX, y, worldZ);
+                        BlockState state = level.getBlockState(pos);
+
+                        if (state.isAir() || state.is(Blocks.WATER)) {
+                            continue;
+                        }
+
+                        if (isSapling(state)) {
+                            if (saplingPos == null) {
+                                saplingPos = pos;
+                                saplingState = state;
+                            }
+                            continue;
+                        }
+
+                        if (isVegetation(state)) {
+                            if (vegetationPos == null) {
+                                vegetationPos = pos;
+                                vegetationState = state;
+                            }
+                            continue;
+                        }
+
+                        if (state.is(Blocks.SNOW) || state.is(Blocks.SNOW_BLOCK)) {
+                            continue;
+                        }
+
+                        if (state.is(Blocks.GRASS_BLOCK)) {
+                            grassPos = pos;
+                            break;
+                        }
+
+                        break;
+                    }
+
+                    if (!saplingEnabled && saplingPos != null && saplingState != null) {
+                        removeSaplingAt(level, chunk, saplingPos, air);
+                        changed++;
+                        removed++;
+                    }
+
+                    if (saplingEnabled && grassPos != null) {
+                        BlockPos abovePos = grassPos.above();
+                        BlockState above = level.getBlockState(abovePos);
+                        if (saplingPos != null && saplingPos.equals(abovePos) && saplingState != null) {
+                            above = saplingState;
+                        } else if (vegetationPos != null && vegetationPos.equals(abovePos) && vegetationState != null) {
+                            above = vegetationState;
+                        }
+
+                        boolean aboveIsSapling = isSapling(above);
+                        boolean aboveIsVegetation = isVegetation(above);
+
+                        if (!aboveIsSapling && (above.isAir() || aboveIsVegetation)) {
+                            Holder<Biome> biomeHolder = chunk.getNoiseBiome(x >> 2, grassPos.getY() >> 2, z >> 2);
+                            random.setSeed((long) worldX * 3129871L ^ (long) worldZ * 116129781L ^ level.getSeed());
+                            float chance = random.nextFloat();
+                            BlockState sapling = getSaplingForBiome(biomeHolder, chance, random);
+
+                            if (sapling != null) {
+                                if (requiresLargeSaplingCluster(sapling)) {
+                                    int localX = abovePos.getX() & 15;
+                                    int localZ = abovePos.getZ() & 15;
+                                    if (localX < 15 && localZ < 15) {
+                                        BlockPos eastPos = abovePos.east();
+                                        BlockPos southPos = abovePos.south();
+                                        BlockPos southEastPos = abovePos.south().east();
+                                        BlockPos eastBase = grassPos.east();
+                                        BlockPos southBase = grassPos.south();
+                                        BlockPos southEastBase = grassPos.south().east();
+
+                                        if (level.getBlockState(eastBase).is(Blocks.GRASS_BLOCK)
+                                            && level.getBlockState(southBase).is(Blocks.GRASS_BLOCK)
+                                            && level.getBlockState(southEastBase).is(Blocks.GRASS_BLOCK)) {
+                                            BlockState eastAbove = level.getBlockState(eastPos);
+                                            BlockState southAbove = level.getBlockState(southPos);
+                                            BlockState southEastAbove = level.getBlockState(southEastPos);
+
+                                            if (isSapling(eastAbove) || isSapling(southAbove) || isSapling(southEastAbove)) {
+                                                continue;
+                                            }
+
+                                            if (aboveIsVegetation) {
+                                                removeVegetationAt(level, chunk, abovePos, above, air);
+                                                changed++;
+                                            }
+                                            if (isVegetation(eastAbove)) {
+                                                removeVegetationAt(level, chunk, eastPos, eastAbove, air);
+                                                changed++;
+                                            }
+                                            if (isVegetation(southAbove)) {
+                                                removeVegetationAt(level, chunk, southPos, southAbove, air);
+                                                changed++;
+                                            }
+                                            if (isVegetation(southEastAbove)) {
+                                                removeVegetationAt(level, chunk, southEastPos, southEastAbove, air);
+                                                changed++;
+                                            }
+
+                                            if (isSaplingPlacementEmpty(eastAbove) && isSaplingPlacementEmpty(southAbove)
+                                                && isSaplingPlacementEmpty(southEastAbove)) {
+                                                placed += placeSaplingAt(level, chunk, abovePos, sapling);
+                                                placed += placeSaplingAt(level, chunk, eastPos, sapling);
+                                                placed += placeSaplingAt(level, chunk, southPos, sapling);
+                                                placed += placeSaplingAt(level, chunk, southEastPos, sapling);
+                                                changed += 4;
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    if (aboveIsVegetation) {
+                                        removeVegetationAt(level, chunk, abovePos, above, air);
+                                        changed++;
+                                    }
+                                    if (placeSaplingAt(level, chunk, abovePos, sapling) > 0) {
+                                        changed++;
+                                        placed++;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Atmosphere.LOGGER.error("Error processing saplings in chunk ({}, {}): {}",
+                chunk.getPos().x, chunk.getPos().z, e.getMessage(), e);
+        }
+
+        if (changed > 0) {
+            chunk.setUnsaved(true);
+        }
+
+        return new SaplingResult(changed, placed, removed);
+    }
+
     private static void removeVegetationAt(ServerLevel level, LevelChunk chunk, BlockPos pos, BlockState state, BlockState air) {
         // Use section manipulation like water system
         int sectionIndex = chunk.getSectionIndex(pos.getY());
@@ -802,6 +988,20 @@ public final class TerraformSystem {
         }
     }
 
+    private static void removeSaplingAt(ServerLevel level, LevelChunk chunk, BlockPos pos, BlockState air) {
+        int sectionIndex = chunk.getSectionIndex(pos.getY());
+        if (sectionIndex >= 0 && sectionIndex < chunk.getSectionsCount()) {
+            var section = chunk.getSection(sectionIndex);
+            section.acquire();
+            try {
+                section.setBlockState(pos.getX() & 15, pos.getY() & 15, pos.getZ() & 15, air, false);
+            } finally {
+                section.release();
+            }
+        }
+        level.getChunkSource().blockChanged(pos);
+    }
+
     /**
      * Checks if a block state is vegetation that should be removed/managed.
      */
@@ -826,6 +1026,86 @@ public final class TerraformSystem {
         return state.is(Blocks.SHORT_GRASS) || state.is(Blocks.TALL_GRASS) ||
                state.is(Blocks.FERN) || state.is(Blocks.LARGE_FERN) ||
                state.is(Blocks.DEAD_BUSH);
+    }
+
+    private static boolean isSapling(BlockState state) {
+        return state.is(Blocks.OAK_SAPLING) || state.is(Blocks.SPRUCE_SAPLING) ||
+               state.is(Blocks.BIRCH_SAPLING) || state.is(Blocks.JUNGLE_SAPLING) ||
+               state.is(Blocks.ACACIA_SAPLING) || state.is(Blocks.DARK_OAK_SAPLING) ||
+               state.is(Blocks.CHERRY_SAPLING);
+    }
+
+    private static boolean isSaplingPlacementEmpty(BlockState state) {
+        return state.isAir() || isVegetation(state);
+    }
+
+    private static boolean requiresLargeSaplingCluster(BlockState state) {
+        return state.is(Blocks.DARK_OAK_SAPLING);
+    }
+
+    private static int placeSaplingAt(ServerLevel level, LevelChunk chunk, BlockPos pos, BlockState sapling) {
+        int sectionIndex = chunk.getSectionIndex(pos.getY());
+        if (sectionIndex < 0 || sectionIndex >= chunk.getSectionsCount()) {
+            return 0;
+        }
+        var section = chunk.getSection(sectionIndex);
+        section.acquire();
+        try {
+            section.setBlockState(pos.getX() & 15, pos.getY() & 15, pos.getZ() & 15, sapling, false);
+        } finally {
+            section.release();
+        }
+        level.getChunkSource().blockChanged(pos);
+        return 1;
+    }
+
+    private static BlockState getSaplingForBiome(Holder<Biome> biomeHolder, float chance, java.util.Random random) {
+        boolean isForest = biomeHolder.is(BiomeTags.IS_FOREST);
+        boolean isTaiga = biomeHolder.is(BiomeTags.IS_TAIGA);
+        boolean isJungle = biomeHolder.is(BiomeTags.IS_JUNGLE);
+        boolean isSavanna = biomeHolder.is(BiomeTags.IS_SAVANNA);
+        boolean isBadlands = biomeHolder.is(BiomeTags.IS_BADLANDS);
+
+        if (isBadlands) {
+            return null;
+        }
+
+        float density = 0.012f;
+        if (isJungle) {
+            density = 0.02f;
+        } else if (isTaiga) {
+            density = 0.016f;
+        } else if (isForest) {
+            density = 0.018f;
+        } else if (isSavanna) {
+            density = 0.014f;
+        }
+
+        if (chance >= density) {
+            return null;
+        }
+
+        if (isJungle) {
+            return Blocks.JUNGLE_SAPLING.defaultBlockState();
+        }
+        if (isTaiga) {
+            return Blocks.SPRUCE_SAPLING.defaultBlockState();
+        }
+        if (isSavanna) {
+            return Blocks.ACACIA_SAPLING.defaultBlockState();
+        }
+        if (isForest) {
+            float roll = random.nextFloat();
+            if (roll < 0.2f) {
+                return Blocks.BIRCH_SAPLING.defaultBlockState();
+            }
+            if (roll < 0.25f) {
+                return Blocks.DARK_OAK_SAPLING.defaultBlockState();
+            }
+            return Blocks.OAK_SAPLING.defaultBlockState();
+        }
+
+        return Blocks.OAK_SAPLING.defaultBlockState();
     }
 
     /**
@@ -1075,6 +1355,18 @@ public final class TerraformSystem {
             this.changed = changed;
             this.grassChanged = grassChanged;
             this.flowerChanged = flowerChanged;
+        }
+    }
+
+    private static final class SaplingResult {
+        private final int changed;
+        private final int placed;
+        private final int removed;
+
+        private SaplingResult(int changed, int placed, int removed) {
+            this.changed = changed;
+            this.placed = placed;
+            this.removed = removed;
         }
     }
 

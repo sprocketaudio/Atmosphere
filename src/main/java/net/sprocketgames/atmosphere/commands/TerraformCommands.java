@@ -28,9 +28,11 @@ public final class TerraformCommands {
                     boolean grassifyEnabled = data.isGrassifyEnabled();
                     boolean grassVegEnabled = data.isGrassVegetationEnabled();
                     boolean flowerVegEnabled = data.isFlowerVegetationEnabled();
+                    boolean saplingEnabled = data.isSaplingEnabled();
                     context.getSource().sendSuccess(
                             () -> Component.literal("Ti=" + terraformIndex + ", waterLevelY=" + waterLevelY +
-                                ", grassify=" + grassifyEnabled + ", grassVeg=" + grassVegEnabled + ", flowers=" + flowerVegEnabled), false);
+                                ", grassify=" + grassifyEnabled + ", grassVeg=" + grassVegEnabled +
+                                ", flowers=" + flowerVegEnabled + ", saplings=" + saplingEnabled), false);
                     return 1;
                 }))
                 .then(Commands.literal("setWaterLevel")
@@ -79,6 +81,18 @@ public final class TerraformCommands {
                                     TerraformSystem.requeueLoaded(overworld);
                                     context.getSource().sendSuccess(
                                             () -> Component.literal("Set flower vegetation to " + enabled), true);
+                                    return 1;
+                                })))
+                .then(Commands.literal("setSaplings")
+                        .then(Commands.argument("enabled", BoolArgumentType.bool())
+                                .executes(context -> {
+                                    boolean enabled = BoolArgumentType.getBool(context, "enabled");
+                                    ServerLevel overworld = context.getSource().getServer().overworld();
+                                    TerraformIndexData data = TerraformIndexData.get(overworld);
+                                    data.setSaplingEnabled(enabled);
+                                    TerraformSystem.requeueLoaded(overworld);
+                                    context.getSource().sendSuccess(
+                                            () -> Component.literal("Set sapling placement to " + enabled), true);
                                     return 1;
                                 }))));
     }
