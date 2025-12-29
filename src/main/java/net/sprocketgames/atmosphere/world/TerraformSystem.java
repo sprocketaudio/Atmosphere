@@ -1,7 +1,9 @@
 package net.sprocketgames.atmosphere.world;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
@@ -25,6 +27,7 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.neoforged.neoforge.event.tick.LevelTickEvent;
 import net.sprocketgames.atmosphere.Atmosphere;
+import net.sprocketgames.atmosphere.config.AtmosphereConfig;
 import net.sprocketgames.atmosphere.data.TerraformIndexData;
 
 /**
@@ -35,7 +38,6 @@ public final class TerraformSystem {
     private static final int PLAYER_PRIORITY_RADIUS = 2;
 
     private static final Map<ResourceKey<Level>, ChunkQueue> QUEUES = new HashMap<>();
-    private static final boolean LOG_CHUNK_UPDATES = true;
 
     private TerraformSystem() {
     }
@@ -195,6 +197,13 @@ public final class TerraformSystem {
             boolean waterNeeded = work.cleanupOnly || !data.isChunkWaterProcessed(chunkKey, waterLevel);
             boolean grassNeeded = !data.isChunkGrassProcessed(chunkKey, grassifyEnabled);
             boolean vegetationNeeded = !data.isChunkVegetationProcessed(chunkKey, grassVegEnabled, flowerVegEnabled);
+            boolean processedWater = false;
+            boolean processedGrass = false;
+            boolean processedVegetation = false;
+            int placed = 0;
+            int removed = 0;
+            int surfaceChanged = 0;
+            VegetationResult vegetationResult = new VegetationResult(0, 0, 0);
 
             if (!waterNeeded && !grassNeeded && !vegetationNeeded) {
                 queue.finish(chunkKey);
@@ -205,17 +214,9 @@ public final class TerraformSystem {
             if (waterNeeded) {
                 int previousWaterLevel = data.getProcessedWaterLevel(chunkKey);
                 boolean allowWaterPlacement = previousWaterLevel == Integer.MIN_VALUE || waterLevel >= previousWaterLevel;
-                int removed = fastDrainChunk(chunk, waterLevel, level);
-                int placed = allowWaterPlacement ? fastFillChunk(chunk, waterLevel, level) : 0;
-                if (LOG_CHUNK_UPDATES && (placed > 0 || removed > 0)) {
-                    Atmosphere.LOGGER.debug(
-                            "Terraform water @ chunk ({}, {}), placed {}, removed {}",
-                            chunk.getPos().x,
-                            chunk.getPos().z,
-                            placed,
-                            removed);
-                }
-
+                removed = fastDrainChunk(chunk, waterLevel, level);
+                placed = allowWaterPlacement ? fastFillChunk(chunk, waterLevel, level) : 0;
+                processedWater = true;
                 boolean wasInitialPass = !work.cleanupOnly;
                 data.markChunkWaterProcessed(chunkKey, waterLevel);
                 if (wasInitialPass) {
@@ -230,16 +231,8 @@ public final class TerraformSystem {
                 } else {
                     changed = transformSurfaceGrassToDirt(chunk, level);
                 }
-
-                if (LOG_CHUNK_UPDATES && changed > 0) {
-                    Atmosphere.LOGGER.debug(
-                            "Terraform surface @ chunk ({}, {}), {} blocks {} -> {}",
-                            chunk.getPos().x,
-                            chunk.getPos().z,
-                            changed,
-                            grassifyEnabled ? "dirt" : "grass",
-                            grassifyEnabled ? "grass" : "dirt");
-                }
+                surfaceChanged = changed;
+                processedGrass = true;
 
                 data.markChunkGrassProcessed(chunkKey, grassifyEnabled);
 
@@ -249,18 +242,46 @@ public final class TerraformSystem {
             }
 
             if (vegetationNeeded) {
-                int changed = processVegetationInChunk(chunk, level, grassVegEnabled, flowerVegEnabled);
-
-                if (LOG_CHUNK_UPDATES && changed > 0) {
-                    Atmosphere.LOGGER.debug(
-                            "Terraform vegetation @ chunk ({}, {}), {} plants {}",
-                            chunk.getPos().x,
-                            chunk.getPos().z,
-                            changed,
-                            (grassVegEnabled && flowerVegEnabled) ? "added" : (grassVegEnabled || flowerVegEnabled) ? "added" : "removed");
-                }
+                VegetationResult result = processVegetationInChunk(chunk, level, grassVegEnabled, flowerVegEnabled);
+                vegetationResult = result;
+                processedVegetation = true;
 
                 data.markChunkVegetationProcessed(chunkKey, grassVegEnabled, flowerVegEnabled);
+            }
+
+            if (AtmosphereConfig.DEBUG_LOGGING.get()) {
+                List<String> summaries = new ArrayList<>();
+                if (processedWater) {
+                    StringBuilder waterSummary = new StringBuilder("water placed=")
+                        .append(placed)
+                        .append(" removed=")
+                        .append(removed);
+                    if (work.cleanupOnly) {
+                        waterSummary.append(" cleanup-only");
+                    }
+                    summaries.add(waterSummary.toString());
+                }
+                if (processedGrass) {
+                    summaries.add(String.format("surface %s=%d",
+                        grassifyEnabled ? "dirt->grass" : "grass->dirt",
+                        surfaceChanged));
+                }
+                if (processedVegetation) {
+                    String vegetationSummary = String.format(
+                        "vegetation %s=%d (grass=%d, flowers=%d)",
+                        (grassVegEnabled || flowerVegEnabled) ? "updated" : "removed",
+                        vegetationResult.changed,
+                        vegetationResult.grassChanged,
+                        vegetationResult.flowerChanged);
+                    summaries.add(vegetationSummary);
+                }
+                if (!summaries.isEmpty()) {
+                    Atmosphere.LOGGER.info(
+                        "Terraform chunk ({}, {}): {}",
+                        chunk.getPos().x,
+                        chunk.getPos().z,
+                        String.join(", ", summaries));
+                }
             }
 
             queue.finish(chunkKey);
@@ -586,39 +607,15 @@ public final class TerraformSystem {
         return changed;
     }
 
-    private static int processVegetationInChunk(LevelChunk chunk, ServerLevel level, boolean grassVegEnabled, boolean flowerVegEnabled) {
+    private static VegetationResult processVegetationInChunk(LevelChunk chunk, ServerLevel level, boolean grassVegEnabled, boolean flowerVegEnabled) {
         int changed = 0;
+        int grassChanged = 0;
+        int flowerChanged = 0;
         java.util.Random random = new java.util.Random();
         BlockState air = Blocks.AIR.defaultBlockState();
 
         int worldBaseX = chunk.getPos().getMinBlockX();
         int worldBaseZ = chunk.getPos().getMinBlockZ();
-
-        Atmosphere.LOGGER.info("Processing vegetation in chunk ({}, {}), grassVeg={}, flowers={}",
-            chunk.getPos().x, chunk.getPos().z, grassVegEnabled, flowerVegEnabled);
-
-        int grassBlocksFound = 0;
-        int airAboveCount = 0;
-        int vegetationFound = 0;
-        int grassVegFound = 0;
-        int flowerFound = 0;
-
-        // Test one position to see what blocks are actually there
-        int testX = 8;
-        int testZ = 8;
-        int testWorldX = worldBaseX + testX;
-        int testWorldZ = worldBaseZ + testZ;
-        int testHintY = chunk.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.OCEAN_FLOOR, testX, testZ);
-        Atmosphere.LOGGER.info("  Test center: worldX={}, worldZ={}, hintY={}", testWorldX, testWorldZ, testHintY);
-
-        // Scan blocks around the hint to see what's there
-        for (int y = Math.min(testHintY + 3, level.getMaxBuildHeight() - 1); y >= Math.max(testHintY - 3, level.getMinBuildHeight()); y--) {
-            BlockPos testPos = new BlockPos(testWorldX, y, testWorldZ);
-            BlockState testState = level.getBlockState(testPos);
-            if (!testState.isAir()) {
-                Atmosphere.LOGGER.info("    Y={}: {}", y, testState.getBlock().getName().getString());
-            }
-        }
 
         try {
             // Process each column in the chunk
@@ -673,56 +670,39 @@ public final class TerraformSystem {
 
                     // Track vegetation even when no grass block is found
                     if (vegetationPos != null) {
-                        vegetationFound++;
-                        boolean vegetationIsGrassVeg = vegetationState.is(Blocks.SHORT_GRASS) || vegetationState.is(Blocks.TALL_GRASS) ||
-                            vegetationState.is(Blocks.FERN) || vegetationState.is(Blocks.LARGE_FERN) || vegetationState.is(Blocks.DEAD_BUSH);
+                        boolean vegetationIsGrassVeg = isGrassVegetation(vegetationState);
                         boolean vegetationIsFlower = !vegetationIsGrassVeg;
-                        if (vegetationIsGrassVeg) {
-                            grassVegFound++;
-                        }
-                        if (vegetationIsFlower) {
-                            flowerFound++;
-                        }
 
                         if (!grassVegEnabled && vegetationIsGrassVeg) {
                             removeVegetationAt(level, chunk, vegetationPos, vegetationState, air);
                             changed++;
+                            grassChanged++;
                             vegetationState = air;
                         } else if (!flowerVegEnabled && vegetationIsFlower) {
                             removeVegetationAt(level, chunk, vegetationPos, vegetationState, air);
                             changed++;
+                            flowerChanged++;
                             vegetationState = air;
                         }
                     }
 
                     // Only process grass-based vegetation if we found a grass block
                     if (grassPos != null) {
-                        grassBlocksFound++;
                         BlockPos abovePos = grassPos.above();
                         // Use level.getBlockState instead of chunk.getBlockState to ensure we read actual world state
                         BlockState above = level.getBlockState(abovePos);
                         if (vegetationPos != null && vegetationPos.equals(abovePos) && vegetationState != null) {
                             above = vegetationState;
                         }
-                        if (above.isAir()) {
-                            airAboveCount++;
-                        }
-
                         boolean aboveIsVegetation = isVegetation(above);
-                        boolean aboveIsGrassVeg = above.is(Blocks.SHORT_GRASS) || above.is(Blocks.TALL_GRASS) ||
-                                                   above.is(Blocks.FERN) || above.is(Blocks.LARGE_FERN) || above.is(Blocks.DEAD_BUSH);
+                        boolean aboveIsGrassVeg = isGrassVegetation(above);
                         boolean aboveIsFlower = aboveIsVegetation && !aboveIsGrassVeg;
-
-                        if (x == 8 && z == 8) {
-                            Atmosphere.LOGGER.info("    Center: grassPos={}, above={}, isVeg={}, isGrassVeg={}, isFlower={}, willRemove={}",
-                                grassPos, above.getBlock().getName().getString(), aboveIsVegetation, aboveIsGrassVeg, aboveIsFlower,
-                                (!grassVegEnabled && aboveIsGrassVeg) || (!flowerVegEnabled && aboveIsFlower));
-                        }
 
                         // First priority: Remove unwanted vegetation
                         if (!grassVegEnabled && aboveIsGrassVeg) {
                             removeVegetationAt(level, chunk, abovePos, above, air);
                             changed++;
+                            grassChanged++;
                             above = air;
                             aboveIsVegetation = false;
                             aboveIsGrassVeg = false;
@@ -731,6 +711,7 @@ public final class TerraformSystem {
                         else if (!flowerVegEnabled && aboveIsFlower) {
                             removeVegetationAt(level, chunk, abovePos, above, air);
                             changed++;
+                            flowerChanged++;
                             above = air;
                             aboveIsVegetation = false;
                             aboveIsGrassVeg = false;
@@ -751,6 +732,11 @@ public final class TerraformSystem {
                                 if (aboveIsVegetation) {
                                     removeVegetationAt(level, chunk, abovePos, above, air);
                                     changed++;
+                                    if (aboveIsGrassVeg) {
+                                        grassChanged++;
+                                    } else if (aboveIsFlower) {
+                                        flowerChanged++;
+                                    }
                                 }
 
                                 // Use the same approach as water system - direct section manipulation
@@ -762,16 +748,21 @@ public final class TerraformSystem {
                                         int localX = abovePos.getX() & 15;
                                         int localY = abovePos.getY() & 15;
                                         int localZ = abovePos.getZ() & 15;
-                                        section.setBlockState(localX, localY, localZ, vegetation, false);
-                                    } finally {
-                                        section.release();
-                                    }
-                                    level.getChunkSource().blockChanged(abovePos);
-                                    changed++;
+                                    section.setBlockState(localX, localY, localZ, vegetation, false);
+                                } finally {
+                                    section.release();
+                                }
+                                level.getChunkSource().blockChanged(abovePos);
+                                changed++;
+                                if (isGrassVegetation(vegetation)) {
+                                    grassChanged++;
+                                } else {
+                                    flowerChanged++;
+                                }
 
-                                    // Handle double-height plants
-                                    if (vegetation.is(Blocks.TALL_GRASS) || vegetation.is(Blocks.LARGE_FERN) ||
-                                        vegetation.is(Blocks.SUNFLOWER) || vegetation.is(Blocks.LILAC) ||
+                                // Handle double-height plants
+                                if (vegetation.is(Blocks.TALL_GRASS) || vegetation.is(Blocks.LARGE_FERN) ||
+                                    vegetation.is(Blocks.SUNFLOWER) || vegetation.is(Blocks.LILAC) ||
                                         vegetation.is(Blocks.ROSE_BUSH) || vegetation.is(Blocks.PEONY)) {
                                         BlockPos aboveAbove = abovePos.above();
                                         int sectionIndex2 = chunk.getSectionIndex(aboveAbove.getY());
@@ -800,14 +791,11 @@ public final class TerraformSystem {
                 chunk.getPos().x, chunk.getPos().z, e.getMessage(), e);
         }
 
-        Atmosphere.LOGGER.info("  Chunk summary: grassBlocks={}, airAbove={}, vegetation={} (grassVeg={}, flowers={}), changed={}",
-            grassBlocksFound, airAboveCount, vegetationFound, grassVegFound, flowerFound, changed);
-
         if (changed > 0) {
             chunk.setUnsaved(true);
         }
 
-        return changed;
+        return new VegetationResult(changed, grassChanged, flowerChanged);
     }
 
     private static void removeVegetationAt(ServerLevel level, LevelChunk chunk, BlockPos pos, BlockState state, BlockState air) {
@@ -864,6 +852,12 @@ public final class TerraformSystem {
                // Double-height flowers
                state.is(Blocks.SUNFLOWER) || state.is(Blocks.LILAC) ||
                state.is(Blocks.ROSE_BUSH) || state.is(Blocks.PEONY);
+    }
+
+    private static boolean isGrassVegetation(BlockState state) {
+        return state.is(Blocks.SHORT_GRASS) || state.is(Blocks.TALL_GRASS) ||
+               state.is(Blocks.FERN) || state.is(Blocks.LARGE_FERN) ||
+               state.is(Blocks.DEAD_BUSH);
     }
 
     /**
@@ -1114,6 +1108,18 @@ public final class TerraformSystem {
 
         boolean hasTask(long chunkKey) {
             return tasks.containsKey(chunkKey);
+        }
+    }
+
+    private static final class VegetationResult {
+        private final int changed;
+        private final int grassChanged;
+        private final int flowerChanged;
+
+        private VegetationResult(int changed, int grassChanged, int flowerChanged) {
+            this.changed = changed;
+            this.grassChanged = grassChanged;
+            this.flowerChanged = flowerChanged;
         }
     }
 
