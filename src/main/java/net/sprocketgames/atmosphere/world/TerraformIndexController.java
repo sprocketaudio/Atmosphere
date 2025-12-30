@@ -13,11 +13,11 @@ import net.sprocketgames.atmosphere.network.AtmosphereNetwork;
 public final class TerraformIndexController {
     private static final int TICKS_PER_SECOND = 20;
     private static final int WATER_BASE_LEVEL = -64;
-    private static final int WATER_MAX_LEVEL = 63;
-    private static final long GRASSIFY_TI = 100;
-    private static final long GRASS_VEGETATION_TI = 105;
-    private static final long FLOWER_TI = 110;
-    private static final long SAPLING_TI = 120;
+    private static final int WATER_MAX_LEVEL = 61;
+    private static final long GRASSIFY_TI = 150;
+    private static final long GRASS_VEGETATION_TI = 170;
+    private static final long FLOWER_TI = 190;
+    private static final long SAPLING_TI = 210;
     private static final Map<ResourceKey<Level>, Integer> AUTO_TICK_COUNTERS = new HashMap<>();
 
     private TerraformIndexController() {
