@@ -76,6 +76,25 @@ public final class TerraformSystem {
 
     }
 
+    public static void enqueueImmediate(ServerLevel level, ChunkPos pos) {
+        ChunkQueue queue = queueFor(level);
+        TerraformIndexData data = TerraformIndexData.get(level);
+        int waterLevel = data.getWaterLevelY();
+        boolean grassifyEnabled = data.isGrassifyEnabled();
+        boolean grassVegEnabled = data.isGrassVegetationEnabled();
+        boolean flowerVegEnabled = data.isFlowerVegetationEnabled();
+        boolean saplingEnabled = data.isSaplingEnabled();
+        long chunkKey = pos.toLong();
+
+        queue.markLoaded(chunkKey);
+        if (needsProcessing(data, chunkKey, waterLevel, grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
+            queue.ensureTask(chunkKey);
+            queue.prioritize(chunkKey);
+        } else if (!queue.hasTask(chunkKey)) {
+            queue.ensureTask(chunkKey);
+        }
+    }
+
     public static void markLoaded(ServerLevel level, ChunkPos pos) {
         ChunkQueue queue = queueFor(level);
         queue.markLoaded(pos.toLong());

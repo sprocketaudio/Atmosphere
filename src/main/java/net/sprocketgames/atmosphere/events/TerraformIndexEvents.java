@@ -41,9 +41,8 @@ public class TerraformIndexEvents {
 
         TerraformIndexData.get(serverLevel).clearChunkState(levelChunk.getPos().toLong());
         TerraformSystem.refreshChunkLighting(levelChunk, serverLevel);
-        TerraformSystem.markLoaded(serverLevel, levelChunk.getPos());
         if (shouldProcessImmediately(serverLevel, levelChunk)) {
-            TerraformSystem.processChunkNow(serverLevel, levelChunk);
+            TerraformSystem.enqueueImmediate(serverLevel, levelChunk.getPos());
         } else {
             TerraformSystem.enqueue(serverLevel, levelChunk.getPos());
         }
