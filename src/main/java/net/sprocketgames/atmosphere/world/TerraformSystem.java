@@ -433,10 +433,9 @@ public final class TerraformSystem {
                             if (state.hasProperty(BlockStateProperties.WATERLOGGED) && state.getValue(BlockStateProperties.WATERLOGGED)) {
                                 BlockState cleared = state.setValue(BlockStateProperties.WATERLOGGED, false);
                                 cursor.set(worldX, worldY, worldBaseZ + z);
-                                setSectionBlockState(level, chunk, section, x, y, z, cleared, cursor);
+                                setSectionBlockState(level, chunk, section, x, worldY, z, cleared, cursor);
                                 updateHeightmaps(chunk, x, worldY, z, cleared);
                                 level.getChunkSource().blockChanged(cursor);
-                                level.getChunkSource().getLightEngine().checkBlock(cursor);
                                 removed++;
                                 continue;
                             }
@@ -446,10 +445,9 @@ public final class TerraformSystem {
                             }
 
                             cursor.set(worldX, worldY, worldBaseZ + z);
-                            setSectionBlockState(level, chunk, section, x, y, z, air, cursor);
+                            setSectionBlockState(level, chunk, section, x, worldY, z, air, cursor);
                             updateHeightmaps(chunk, x, worldY, z, air);
                             level.getChunkSource().blockChanged(cursor);
-                            level.getChunkSource().getLightEngine().checkBlock(cursor);
                             removed++;
                         }
                     }
@@ -543,13 +541,12 @@ public final class TerraformSystem {
                     LevelChunkSection section = chunk.getSection(sectionIndex);
                     section.acquire();
                     try {
-                        setSectionBlockState(level, chunk, section, x, worldY & 15, z, water, pos);
+                        setSectionBlockState(level, chunk, section, x, worldY, z, water, pos);
                     } finally {
                         section.release();
                     }
                     updateHeightmaps(chunk, x, worldY, z, water);
                     level.getChunkSource().blockChanged(pos);
-                    level.getChunkSource().getLightEngine().checkBlock(pos);
                     placed++;
                 }
             } else if (!state.is(Blocks.WATER)) {
@@ -607,24 +604,22 @@ public final class TerraformSystem {
                         continue;
                     }
                     LevelChunkSection section = chunk.getSection(sectionIndex);
-                    int localY = y & 15;
                     section.acquire();
                     try {
+                        int localY = y & 15;
                         BlockState state = section.getBlockState(x, localY, z);
                         if (state.hasProperty(BlockStateProperties.WATERLOGGED)
                             && state.getValue(BlockStateProperties.WATERLOGGED)) {
                             BlockState clearedState = state.setValue(BlockStateProperties.WATERLOGGED, false);
-                        cursor.set(worldBaseX + x, y, worldBaseZ + z);
-                        setSectionBlockState(level, chunk, section, x, localY, z, clearedState, cursor);
-                        updateHeightmaps(chunk, x, y, z, clearedState);
-                        level.getChunkSource().blockChanged(cursor);
-                        level.getChunkSource().getLightEngine().checkBlock(cursor);
-                    } else if (state.getFluidState().is(FluidTags.WATER)) {
-                        cursor.set(worldBaseX + x, y, worldBaseZ + z);
-                        setSectionBlockState(level, chunk, section, x, localY, z, air, cursor);
-                        updateHeightmaps(chunk, x, y, z, air);
-                        level.getChunkSource().blockChanged(cursor);
-                        level.getChunkSource().getLightEngine().checkBlock(cursor);
+                            cursor.set(worldBaseX + x, y, worldBaseZ + z);
+                            setSectionBlockState(level, chunk, section, x, y, z, clearedState, cursor);
+                            updateHeightmaps(chunk, x, y, z, clearedState);
+                            level.getChunkSource().blockChanged(cursor);
+                        } else if (state.getFluidState().is(FluidTags.WATER)) {
+                            cursor.set(worldBaseX + x, y, worldBaseZ + z);
+                            setSectionBlockState(level, chunk, section, x, y, z, air, cursor);
+                            updateHeightmaps(chunk, x, y, z, air);
+                            level.getChunkSource().blockChanged(cursor);
                         } else {
                             continue;
                         }
@@ -693,19 +688,17 @@ public final class TerraformSystem {
                     BlockState state = section.getBlockState(x, localY, z);
                     if (state.getFluidState().is(FluidTags.WATER) && !state.getFluidState().isSource()) {
                         cursor.set(worldX, waterLevelY, worldBaseZ + z);
-                        setSectionBlockState(level, chunk, section, x, localY, z, Blocks.AIR.defaultBlockState(), cursor);
+                        setSectionBlockState(level, chunk, section, x, waterLevelY, z, Blocks.AIR.defaultBlockState(), cursor);
                         updateHeightmaps(chunk, x, waterLevelY, z, Blocks.AIR.defaultBlockState());
                         level.getChunkSource().blockChanged(cursor);
-                        level.getChunkSource().getLightEngine().checkBlock(cursor);
                         changed = true;
                     } else if (state.hasProperty(BlockStateProperties.WATERLOGGED)
                         && state.getValue(BlockStateProperties.WATERLOGGED)) {
                         BlockState cleared = state.setValue(BlockStateProperties.WATERLOGGED, false);
                         cursor.set(worldX, waterLevelY, worldBaseZ + z);
-                        setSectionBlockState(level, chunk, section, x, localY, z, cleared, cursor);
+                        setSectionBlockState(level, chunk, section, x, waterLevelY, z, cleared, cursor);
                         updateHeightmaps(chunk, x, waterLevelY, z, cleared);
                         level.getChunkSource().blockChanged(cursor);
-                        level.getChunkSource().getLightEngine().checkBlock(cursor);
                         changed = true;
                     }
                 }
@@ -744,12 +737,18 @@ public final class TerraformSystem {
     }
 
     private static void setSectionBlockState(ServerLevel level, LevelChunk chunk, LevelChunkSection section, int localX,
-                                             int localY, int localZ, BlockState state, BlockPos pos) {
+                                             int worldY, int localZ, BlockState state, BlockPos pos) {
+        int localY = worldY & 15;
         boolean wasEmpty = section.hasOnlyAir();
+        BlockState previous = section.getBlockState(localX, localY, localZ);
         section.setBlockState(localX, localY, localZ, state, false);
         boolean isEmpty = section.hasOnlyAir();
         if (wasEmpty != isEmpty) {
             level.getChunkSource().getLightEngine().updateSectionStatus(pos, isEmpty);
+        }
+        if (net.minecraft.world.level.lighting.LightEngine.hasDifferentLightProperties(chunk, pos, previous, state)) {
+            chunk.getSkyLightSources().update(chunk, localX, worldY, localZ);
+            level.getChunkSource().getLightEngine().checkBlock(pos);
         }
     }
 
@@ -829,23 +828,27 @@ public final class TerraformSystem {
         }
 
         long now = level.getGameTime();
-        for (Long2ObjectMap.Entry<ChunkGate> entry : gates.long2ObjectEntrySet()) {
+        var iterator = gates.long2ObjectEntrySet().iterator();
+        while (iterator.hasNext()) {
+            Long2ObjectMap.Entry<ChunkGate> entry = iterator.next();
             ChunkGate gate = entry.getValue();
-            if (!gate.timedOut && now - gate.startTick >= GATE_TIMEOUT_TICKS) {
-                Atmosphere.LOGGER.warn(
-                    "Terraform gating exceeded {} ticks for chunk {} in {}. Releasing send gate early.",
-                    GATE_TIMEOUT_TICKS,
-                    new ChunkPos(entry.getLongKey()),
-                    level.dimension().location());
-                gate.timedOut = true;
-                if (!gate.future.isDone()) {
-                    gate.future.complete(null);
-                }
-                LevelChunk chunk = level.getChunkSource().getChunkNow(ChunkPos.getX(entry.getLongKey()), ChunkPos.getZ(entry.getLongKey()));
-                if (chunk != null) {
-                    resendChunkToWatchers(chunk, level);
-                }
+            if (now - gate.startTick < GATE_TIMEOUT_TICKS) {
+                continue;
             }
+
+            Atmosphere.LOGGER.warn(
+                "Terraform gating exceeded {} ticks for chunk {} in {}. Releasing send gate early.",
+                GATE_TIMEOUT_TICKS,
+                new ChunkPos(entry.getLongKey()),
+                level.dimension().location());
+            if (!gate.future.isDone()) {
+                gate.future.complete(null);
+            }
+            LevelChunk chunk = level.getChunkSource().getChunkNow(ChunkPos.getX(entry.getLongKey()), ChunkPos.getZ(entry.getLongKey()));
+            if (chunk != null) {
+                resendChunkToWatchers(chunk, level);
+            }
+            iterator.remove();
         }
     }
 
