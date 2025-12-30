@@ -9,6 +9,7 @@ import net.neoforged.neoforge.event.level.ChunkEvent;
 import net.sprocketgames.atmosphere.data.TerraformIndexData;
 import net.sprocketgames.atmosphere.network.AtmosphereNetwork;
 import net.sprocketgames.atmosphere.world.TerraformSystem;
+import net.sprocketgames.atmosphere.worldgen.NoWaterChunkGenerator;
 
 public class TerraformIndexEvents {
     public static void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
@@ -40,7 +41,9 @@ public class TerraformIndexEvents {
         }
 
         TerraformIndexData.get(serverLevel).clearChunkState(levelChunk.getPos().toLong());
-        TerraformSystem.applyNoWaterWorldgen(serverLevel, levelChunk);
+        if (!(serverLevel.getChunkSource().getGenerator() instanceof NoWaterChunkGenerator)) {
+            TerraformSystem.applyNoWaterWorldgen(serverLevel, levelChunk);
+        }
 
         if (shouldProcessImmediately(serverLevel, levelChunk)) {
             TerraformSystem.enqueueImmediate(serverLevel, levelChunk.getPos());

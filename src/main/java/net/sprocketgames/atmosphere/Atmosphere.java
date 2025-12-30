@@ -18,6 +18,7 @@ import net.sprocketgames.atmosphere.network.AtmosphereNetwork;
 import net.sprocketgames.atmosphere.config.AtmosphereConfig;
 import net.sprocketgames.atmosphere.world.TerraformIndexController;
 import net.sprocketgames.atmosphere.world.TerraformSystem;
+import net.sprocketgames.atmosphere.worldgen.AtmosphereWorldgen;
 
 // The value here should match an entry in the META-INF/neoforge.mods.toml file
 @Mod(Atmosphere.MOD_ID)
@@ -28,6 +29,7 @@ public class Atmosphere {
     public Atmosphere(IEventBus modEventBus) {
         modEventBus.addListener(this::onCommonSetup);
         modEventBus.addListener(AtmosphereNetwork::register);
+        AtmosphereWorldgen.register(modEventBus);
 
         ModLoadingContext.get().getActiveContainer().registerConfig(ModConfig.Type.COMMON, AtmosphereConfig.SPEC);
 
