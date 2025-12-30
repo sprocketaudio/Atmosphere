@@ -432,8 +432,8 @@ public final class TerraformSystem {
                             BlockState state = section.getBlockState(x, y, z);
                             if (state.hasProperty(BlockStateProperties.WATERLOGGED) && state.getValue(BlockStateProperties.WATERLOGGED)) {
                                 BlockState cleared = state.setValue(BlockStateProperties.WATERLOGGED, false);
-                                section.setBlockState(x, y, z, cleared, false);
                                 cursor.set(worldX, worldY, worldBaseZ + z);
+                                setSectionBlockState(level, chunk, section, x, y, z, cleared, cursor);
                                 updateHeightmaps(chunk, x, worldY, z, cleared);
                                 level.getChunkSource().blockChanged(cursor);
                                 level.getChunkSource().getLightEngine().checkBlock(cursor);
@@ -445,8 +445,8 @@ public final class TerraformSystem {
                                 continue;
                             }
 
-                            section.setBlockState(x, y, z, air, false);
                             cursor.set(worldX, worldY, worldBaseZ + z);
+                            setSectionBlockState(level, chunk, section, x, y, z, air, cursor);
                             updateHeightmaps(chunk, x, worldY, z, air);
                             level.getChunkSource().blockChanged(cursor);
                             level.getChunkSource().getLightEngine().checkBlock(cursor);
@@ -543,7 +543,7 @@ public final class TerraformSystem {
                     LevelChunkSection section = chunk.getSection(sectionIndex);
                     section.acquire();
                     try {
-                        section.setBlockState(x, worldY & 15, z, water, false);
+                        setSectionBlockState(level, chunk, section, x, worldY & 15, z, water, pos);
                     } finally {
                         section.release();
                     }
@@ -614,17 +614,17 @@ public final class TerraformSystem {
                         if (state.hasProperty(BlockStateProperties.WATERLOGGED)
                             && state.getValue(BlockStateProperties.WATERLOGGED)) {
                             BlockState clearedState = state.setValue(BlockStateProperties.WATERLOGGED, false);
-                            section.setBlockState(x, localY, z, clearedState, false);
-                            cursor.set(worldBaseX + x, y, worldBaseZ + z);
-                            updateHeightmaps(chunk, x, y, z, clearedState);
-                            level.getChunkSource().blockChanged(cursor);
-                            level.getChunkSource().getLightEngine().checkBlock(cursor);
-                        } else if (state.getFluidState().is(FluidTags.WATER)) {
-                            section.setBlockState(x, localY, z, air, false);
-                            cursor.set(worldBaseX + x, y, worldBaseZ + z);
-                            updateHeightmaps(chunk, x, y, z, air);
-                            level.getChunkSource().blockChanged(cursor);
-                            level.getChunkSource().getLightEngine().checkBlock(cursor);
+                        cursor.set(worldBaseX + x, y, worldBaseZ + z);
+                        setSectionBlockState(level, chunk, section, x, localY, z, clearedState, cursor);
+                        updateHeightmaps(chunk, x, y, z, clearedState);
+                        level.getChunkSource().blockChanged(cursor);
+                        level.getChunkSource().getLightEngine().checkBlock(cursor);
+                    } else if (state.getFluidState().is(FluidTags.WATER)) {
+                        cursor.set(worldBaseX + x, y, worldBaseZ + z);
+                        setSectionBlockState(level, chunk, section, x, localY, z, air, cursor);
+                        updateHeightmaps(chunk, x, y, z, air);
+                        level.getChunkSource().blockChanged(cursor);
+                        level.getChunkSource().getLightEngine().checkBlock(cursor);
                         } else {
                             continue;
                         }
@@ -692,8 +692,8 @@ public final class TerraformSystem {
                 for (int z = 0; z < 16; z++) {
                     BlockState state = section.getBlockState(x, localY, z);
                     if (state.getFluidState().is(FluidTags.WATER) && !state.getFluidState().isSource()) {
-                        section.setBlockState(x, localY, z, Blocks.AIR.defaultBlockState(), false);
                         cursor.set(worldX, waterLevelY, worldBaseZ + z);
+                        setSectionBlockState(level, chunk, section, x, localY, z, Blocks.AIR.defaultBlockState(), cursor);
                         updateHeightmaps(chunk, x, waterLevelY, z, Blocks.AIR.defaultBlockState());
                         level.getChunkSource().blockChanged(cursor);
                         level.getChunkSource().getLightEngine().checkBlock(cursor);
@@ -701,8 +701,8 @@ public final class TerraformSystem {
                     } else if (state.hasProperty(BlockStateProperties.WATERLOGGED)
                         && state.getValue(BlockStateProperties.WATERLOGGED)) {
                         BlockState cleared = state.setValue(BlockStateProperties.WATERLOGGED, false);
-                        section.setBlockState(x, localY, z, cleared, false);
                         cursor.set(worldX, waterLevelY, worldBaseZ + z);
+                        setSectionBlockState(level, chunk, section, x, localY, z, cleared, cursor);
                         updateHeightmaps(chunk, x, waterLevelY, z, cleared);
                         level.getChunkSource().blockChanged(cursor);
                         level.getChunkSource().getLightEngine().checkBlock(cursor);
@@ -741,6 +741,16 @@ public final class TerraformSystem {
         chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES).update(localX, worldY, localZ, state);
         chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.OCEAN_FLOOR).update(localX, worldY, localZ, state);
         chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE).update(localX, worldY, localZ, state);
+    }
+
+    private static void setSectionBlockState(ServerLevel level, LevelChunk chunk, LevelChunkSection section, int localX,
+                                             int localY, int localZ, BlockState state, BlockPos pos) {
+        boolean wasEmpty = section.hasOnlyAir();
+        section.setBlockState(localX, localY, localZ, state, false);
+        boolean isEmpty = section.hasOnlyAir();
+        if (wasEmpty != isEmpty) {
+            level.getChunkSource().getLightEngine().updateSectionStatus(pos, isEmpty);
+        }
     }
 
     private static void seedFromNeighborWater(ServerLevel level, BlockPos borderPos, BlockPos neighborPos,
