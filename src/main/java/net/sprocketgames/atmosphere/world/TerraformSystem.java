@@ -79,7 +79,10 @@ public final class TerraformSystem {
         if (needsProcessing(data, chunkKey, seaLevel, noWaterWorldgen, terraformWaterEnabled, grassifyEnabled,
             grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
             queue.ensureTask(chunkKey);
-            queue.prioritize(chunkKey);
+            if (needsNonWaterProcessing(data, chunkKey, seaLevel, noWaterWorldgen, grassifyEnabled,
+                grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
+                queue.prioritize(chunkKey);
+            }
         } else if (!queue.hasTask(chunkKey)) {
             queue.ensureTask(chunkKey);
         }
@@ -102,7 +105,10 @@ public final class TerraformSystem {
         if (needsProcessing(data, chunkKey, seaLevel, noWaterWorldgen, terraformWaterEnabled, grassifyEnabled,
             grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
             queue.ensureTask(chunkKey);
-            queue.prioritize(chunkKey);
+            if (needsNonWaterProcessing(data, chunkKey, seaLevel, noWaterWorldgen, grassifyEnabled,
+                grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
+                queue.prioritize(chunkKey);
+            }
         } else if (!queue.hasTask(chunkKey)) {
             queue.ensureTask(chunkKey);
         }
@@ -221,6 +227,16 @@ public final class TerraformSystem {
                                            boolean saplingEnabled) {
         return (noWaterWorldgen && !data.isChunkSurfaceProcessed(chunkKey, seaLevel))
             || (terraformWaterEnabled && !data.isChunkWaterProcessed(chunkKey, seaLevel))
+            || !data.isChunkGrassProcessed(chunkKey, grassifyEnabled)
+            || !data.isChunkVegetationProcessed(chunkKey, grassVegEnabled, flowerVegEnabled)
+            || !data.isChunkSaplingProcessed(chunkKey, saplingEnabled);
+    }
+
+    private static boolean needsNonWaterProcessing(TerraformIndexData data, long chunkKey, int seaLevel,
+                                                   boolean noWaterWorldgen, boolean grassifyEnabled,
+                                                   boolean grassVegEnabled, boolean flowerVegEnabled,
+                                                   boolean saplingEnabled) {
+        return (noWaterWorldgen && !data.isChunkSurfaceProcessed(chunkKey, seaLevel))
             || !data.isChunkGrassProcessed(chunkKey, grassifyEnabled)
             || !data.isChunkVegetationProcessed(chunkKey, grassVegEnabled, flowerVegEnabled)
             || !data.isChunkSaplingProcessed(chunkKey, saplingEnabled);
@@ -1105,7 +1121,10 @@ public final class TerraformSystem {
                             if (!queue.hasTask(chunkKey)) {
                                 queue.ensureTask(chunkKey);
                             }
-                            queue.prioritize(chunkKey);
+                            if (needsNonWaterProcessing(data, chunkKey, seaLevel, noWaterWorldgen, grassifyEnabled,
+                                grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
+                                queue.prioritize(chunkKey);
+                            }
                         }
                     }
                 }
