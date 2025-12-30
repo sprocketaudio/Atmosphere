@@ -40,13 +40,17 @@ public class TerraformIndexEvents {
         }
 
         TerraformIndexData.get(serverLevel).clearChunkState(levelChunk.getPos().toLong());
-        if (shouldProcessImmediately(serverLevel, levelChunk)) {
+        boolean shouldProcessImmediately = shouldProcessImmediately(serverLevel, levelChunk);
+        if (shouldDrainImmediately(serverLevel, levelChunk)) {
             int waterLevelY = TerraformIndexData.get(serverLevel).getWaterLevelY();
             int drained = TerraformSystem.drainSurfaceWater(levelChunk, serverLevel, waterLevelY);
             TerraformSystem.refreshChunkLighting(levelChunk, serverLevel);
             if (drained > 0) {
                 TerraformSystem.resendChunkToWatchers(levelChunk, serverLevel);
             }
+        }
+
+        if (shouldProcessImmediately) {
             TerraformSystem.enqueueImmediate(serverLevel, levelChunk.getPos());
         } else {
             TerraformSystem.refreshChunkLighting(levelChunk, serverLevel);
@@ -71,18 +75,27 @@ public class TerraformIndexEvents {
     }
 
     private static boolean shouldProcessImmediately(ServerLevel level, LevelChunk chunk) {
+        return isChunkWithinViewDistance(level, chunk, 0);
+    }
+
+    private static boolean shouldDrainImmediately(ServerLevel level, LevelChunk chunk) {
+        return isChunkWithinViewDistance(level, chunk, 2);
+    }
+
+    private static boolean isChunkWithinViewDistance(ServerLevel level, LevelChunk chunk, int buffer) {
         if (level.players().isEmpty()) {
             return false;
         }
 
         int viewDistance = Math.max(0, level.getServer().getPlayerList().getViewDistance());
+        int maxDistance = viewDistance + buffer;
         int chunkX = chunk.getPos().x;
         int chunkZ = chunk.getPos().z;
 
         for (ServerPlayer player : level.players()) {
             int dx = Math.abs(chunkX - player.chunkPosition().x);
             int dz = Math.abs(chunkZ - player.chunkPosition().z);
-            if (Math.max(dx, dz) <= viewDistance) {
+            if (Math.max(dx, dz) <= maxDistance) {
                 return true;
             }
         }
