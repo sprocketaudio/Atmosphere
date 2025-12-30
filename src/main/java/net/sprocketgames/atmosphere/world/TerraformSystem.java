@@ -2,6 +2,7 @@ package net.sprocketgames.atmosphere.world;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -132,6 +133,7 @@ public final class TerraformSystem {
         SurfaceResult result = applyNoWaterSurface(chunk, level, seaLevel);
         data.markChunkSurfaceProcessed(chunkKey, seaLevel);
         if (result.surfaceChanged > 0 || result.waterRemoved > 0) {
+            Heightmap.primeHeightmaps(chunk, EnumSet.of(Heightmap.Types.WORLD_SURFACE, Heightmap.Types.OCEAN_FLOOR));
             refreshChunkLighting(chunk, level);
             level.getChunkSource().chunkMap.waitForLightBeforeSending(chunk.getPos(), 0);
         }
