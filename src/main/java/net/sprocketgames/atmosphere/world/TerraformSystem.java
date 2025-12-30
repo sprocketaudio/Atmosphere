@@ -403,27 +403,22 @@ public final class TerraformSystem {
         }
 
         boolean surfaceWorkDone = processedSurface || processedGrass || processedVegetation || processedSaplings;
-        if (waterNeeded && !surfaceWorkDone) {
+        if (waterNeeded) {
             WaterFillState state = getOrCreateWaterFillState(level, chunk, seaLevel);
             if (!state.surfaceWaterDone) {
                 waterResult = applySurfaceWater(chunk, level, seaLevel, state);
                 processedWater = true;
                 waterComplete = false;
-            } else {
+            } else if (!surfaceWorkDone) {
                 waterResult = applyTerraformWater(chunk, level, seaLevel);
                 processedWater = true;
                 waterComplete = waterResult.complete;
                 if (waterComplete) {
                     data.markChunkWaterProcessed(chunkKey, seaLevel);
                 }
+            } else {
+                waterComplete = false;
             }
-        } else if (waterNeeded) {
-            WaterFillState state = getOrCreateWaterFillState(level, chunk, seaLevel);
-            if (!state.surfaceWaterDone) {
-                waterResult = applySurfaceWater(chunk, level, seaLevel, state);
-                processedWater = true;
-            }
-            waterComplete = false;
         }
 
         if (AtmosphereConfig.DEBUG_LOGGING.get()) {
