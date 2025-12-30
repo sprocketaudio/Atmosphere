@@ -35,6 +35,7 @@ import net.sprocketgames.atmosphere.data.TerraformIndexData;
  */
 public final class TerraformSystem {
     private static final int MAX_CHUNKS_PER_TICK = 4;
+    private static final int MAX_PRIORITY_CHUNKS_PER_TICK = 8;
     private static final int[] OFFSETS_X = {1, -1, 0, 0, 0, 0};
     private static final int[] OFFSETS_Y = {0, 0, 1, -1, 0, 0};
     private static final int[] OFFSETS_Z = {0, 0, 0, 0, 1, -1};
@@ -201,13 +202,15 @@ public final class TerraformSystem {
         }
 
         int processedChunks = 0;
+        int processedPriority = 0;
 
-        while (processedChunks < MAX_CHUNKS_PER_TICK) {
+        while (processedChunks < MAX_CHUNKS_PER_TICK || (queue.hasPriority() && processedPriority < MAX_PRIORITY_CHUNKS_PER_TICK)) {
             long chunkKey;
             boolean fromPriority;
             if (queue.hasPriority()) {
                 chunkKey = queue.popPriority();
                 fromPriority = true;
+                processedPriority++;
             } else if (queue.hasNormal()) {
                 chunkKey = queue.popNormal();
                 fromPriority = false;
