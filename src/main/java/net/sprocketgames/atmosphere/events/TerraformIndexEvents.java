@@ -6,6 +6,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
+import net.neoforged.neoforge.event.level.ChunkWatchEvent;
 import net.sprocketgames.atmosphere.data.TerraformIndexData;
 import net.sprocketgames.atmosphere.network.AtmosphereNetwork;
 import net.sprocketgames.atmosphere.world.TerraformSystem;
@@ -55,12 +56,36 @@ public class TerraformIndexEvents {
         }
 
         if (needsProcessing) {
-            TerraformSystem.gateChunkSend(serverLevel, levelChunk.getPos());
             if (shouldProcessImmediately(serverLevel, levelChunk)) {
                 TerraformSystem.enqueueImmediate(serverLevel, levelChunk.getPos());
             } else {
                 TerraformSystem.enqueue(serverLevel, levelChunk.getPos());
             }
+        }
+    }
+
+    public static void onChunkWatch(ChunkWatchEvent.Watch event) {
+        ServerLevel serverLevel = event.getLevel();
+        if (serverLevel.dimension() != Level.OVERWORLD) {
+            return;
+        }
+
+        LevelChunk levelChunk = event.getChunk();
+        TerraformIndexData data = TerraformIndexData.get(serverLevel);
+        long chunkKey = levelChunk.getPos().toLong();
+        int waterLevelY = data.getWaterLevelY();
+        boolean grassifyEnabled = data.isGrassifyEnabled();
+        boolean grassVegEnabled = data.isGrassVegetationEnabled();
+        boolean flowerVegEnabled = data.isFlowerVegetationEnabled();
+        boolean saplingEnabled = data.isSaplingEnabled();
+        boolean needsProcessing = !data.isChunkWaterProcessed(chunkKey, waterLevelY)
+            || !data.isChunkGrassProcessed(chunkKey, grassifyEnabled)
+            || !data.isChunkVegetationProcessed(chunkKey, grassVegEnabled, flowerVegEnabled)
+            || !data.isChunkSaplingProcessed(chunkKey, saplingEnabled);
+
+        if (needsProcessing) {
+            TerraformSystem.gateChunkSend(serverLevel, levelChunk.getPos());
+            TerraformSystem.enqueueImmediate(serverLevel, levelChunk.getPos());
         }
     }
 
