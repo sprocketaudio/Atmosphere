@@ -285,6 +285,7 @@ public final class TerraformSystem {
             }
 
             if (waterUpdated) {
+                cleanupSurfaceWater(chunk, level, waterLevel);
                 refreshChunkLighting(chunk, level);
             }
 
@@ -516,6 +517,51 @@ public final class TerraformSystem {
         }
 
         return placed;
+    }
+
+    private static void cleanupSurfaceWater(LevelChunk chunk, ServerLevel level, int waterLevelY) {
+        int sectionIndex = chunk.getSectionIndex(waterLevelY);
+        if (sectionIndex < 0 || sectionIndex >= chunk.getSectionsCount()) {
+            return;
+        }
+
+        LevelChunkSection section = chunk.getSection(sectionIndex);
+        int localY = waterLevelY & 15;
+        int worldBaseX = chunk.getPos().getMinBlockX();
+        int worldBaseZ = chunk.getPos().getMinBlockZ();
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        boolean changed = false;
+
+        section.acquire();
+        try {
+            for (int x = 0; x < 16; x++) {
+                int worldX = worldBaseX + x;
+                for (int z = 0; z < 16; z++) {
+                    BlockState state = section.getBlockState(x, localY, z);
+                    if (state.getFluidState().is(FluidTags.WATER) && !state.getFluidState().isSource()) {
+                        section.setBlockState(x, localY, z, Blocks.AIR.defaultBlockState(), false);
+                        cursor.set(worldX, waterLevelY, worldBaseZ + z);
+                        level.getChunkSource().blockChanged(cursor);
+                        level.getChunkSource().getLightEngine().checkBlock(cursor);
+                        changed = true;
+                    } else if (state.hasProperty(BlockStateProperties.WATERLOGGED)
+                        && state.getValue(BlockStateProperties.WATERLOGGED)) {
+                        BlockState cleared = state.setValue(BlockStateProperties.WATERLOGGED, false);
+                        section.setBlockState(x, localY, z, cleared, false);
+                        cursor.set(worldX, waterLevelY, worldBaseZ + z);
+                        level.getChunkSource().blockChanged(cursor);
+                        level.getChunkSource().getLightEngine().checkBlock(cursor);
+                        changed = true;
+                    }
+                }
+            }
+        } finally {
+            section.release();
+        }
+
+        if (changed) {
+            chunk.setUnsaved(true);
+        }
     }
 
     private static void seedFromNeighborWater(ServerLevel level, BlockPos borderPos, BlockPos neighborPos,
