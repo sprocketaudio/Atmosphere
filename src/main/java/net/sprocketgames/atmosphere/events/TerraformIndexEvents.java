@@ -35,23 +35,32 @@ public class TerraformIndexEvents {
             return;
         }
 
+        TerraformIndexData data = TerraformIndexData.get(serverLevel);
+        long chunkKey = levelChunk.getPos().toLong();
+        int waterLevelY = data.getWaterLevelY();
+        boolean grassifyEnabled = data.isGrassifyEnabled();
+        boolean grassVegEnabled = data.isGrassVegetationEnabled();
+        boolean flowerVegEnabled = data.isFlowerVegetationEnabled();
+        boolean saplingEnabled = data.isSaplingEnabled();
+        boolean needsProcessing = !data.isChunkWaterProcessed(chunkKey, waterLevelY)
+            || !data.isChunkGrassProcessed(chunkKey, grassifyEnabled)
+            || !data.isChunkVegetationProcessed(chunkKey, grassVegEnabled, flowerVegEnabled)
+            || !data.isChunkSaplingProcessed(chunkKey, saplingEnabled);
+
+        TerraformSystem.markLoaded(serverLevel, levelChunk.getPos());
+
         if (event.isNewChunk()) {
-            TerraformSystem.replaceGrassWithDirt(levelChunk, serverLevel);
+            data.clearChunkState(chunkKey);
+            needsProcessing = true;
         }
 
-        TerraformIndexData.get(serverLevel).clearChunkState(levelChunk.getPos().toLong());
-        int waterLevelY = TerraformIndexData.get(serverLevel).getWaterLevelY();
-        int drained = TerraformSystem.drainSurfaceWater(levelChunk, serverLevel, waterLevelY);
-        TerraformSystem.refreshChunkLighting(levelChunk, serverLevel);
-        if (drained > 0) {
-            serverLevel.getChunkSource().chunkMap.waitForLightBeforeSending(levelChunk.getPos(), 0);
-            TerraformSystem.resendChunkToWatchers(levelChunk, serverLevel);
-        }
-
-        if (shouldProcessImmediately(serverLevel, levelChunk)) {
-            TerraformSystem.enqueueImmediate(serverLevel, levelChunk.getPos());
-        } else {
-            TerraformSystem.enqueue(serverLevel, levelChunk.getPos());
+        if (needsProcessing) {
+            TerraformSystem.gateChunkSend(serverLevel, levelChunk.getPos());
+            if (shouldProcessImmediately(serverLevel, levelChunk)) {
+                TerraformSystem.enqueueImmediate(serverLevel, levelChunk.getPos());
+            } else {
+                TerraformSystem.enqueue(serverLevel, levelChunk.getPos());
+            }
         }
     }
 

@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
@@ -39,11 +40,13 @@ public final class TerraformSystem {
     private static final int MAX_CHUNKS_PER_TICK = 4;
     private static final int MAX_PRIORITY_CHUNKS_PER_TICK = 8;
     private static final int SURFACE_DRAIN_DEPTH = 3;
+    private static final long GATE_TIMEOUT_TICKS = 20L * 10L;
     private static final int[] OFFSETS_X = {1, -1, 0, 0, 0, 0};
     private static final int[] OFFSETS_Y = {0, 0, 1, -1, 0, 0};
     private static final int[] OFFSETS_Z = {0, 0, 0, 0, 1, -1};
 
     private static final Map<ResourceKey<Level>, ChunkQueue> QUEUES = new HashMap<>();
+    private static final Map<ResourceKey<Level>, Long2ObjectMap<ChunkGate>> GATED_CHUNKS = new HashMap<>();
 
     private TerraformSystem() {
     }
@@ -57,6 +60,7 @@ public final class TerraformSystem {
             return;
         }
 
+        tickGatedChunks(serverLevel);
         processQueue(serverLevel);
     }
 
@@ -119,11 +123,19 @@ public final class TerraformSystem {
     public static void unload(ServerLevel level, ChunkPos pos) {
         ChunkQueue queue = queueFor(level);
         queue.drop(pos.toLong());
+        clearChunkGate(level, pos);
     }
 
     public static void requeueLoaded(ServerLevel level) {
         ChunkQueue queue = queueFor(level);
         queue.requeueLoaded();
+        TerraformIndexData data = TerraformIndexData.get(level);
+        int waterLevel = data.getWaterLevelY();
+        boolean grassifyEnabled = data.isGrassifyEnabled();
+        boolean grassVegEnabled = data.isGrassVegetationEnabled();
+        boolean flowerVegEnabled = data.isFlowerVegetationEnabled();
+        boolean saplingEnabled = data.isSaplingEnabled();
+        prioritizePlayerChunks(level, queue, data, waterLevel, grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled);
     }
 
     public static void replaceGrassWithDirt(LevelChunk chunk, ServerLevel level) {
@@ -261,6 +273,7 @@ public final class TerraformSystem {
         VegetationResult vegetationResult = new VegetationResult(0, 0, 0);
         SaplingResult saplingResult = new SaplingResult(0, 0, 0);
         boolean waterUpdated = false;
+        boolean terraformChanged = false;
 
         if (!waterNeeded && !grassNeeded && !vegetationNeeded && !saplingNeeded) {
             return;
@@ -330,11 +343,18 @@ public final class TerraformSystem {
             data.markChunkSaplingProcessed(chunkKey, true);
         }
 
+        terraformChanged = waterUpdated || surfaceChanged > 0 || vegetationResult.changed > 0 || saplingResult.changed > 0;
+
         if (waterUpdated) {
             cleanupSurfaceWater(chunk, level, waterLevel);
             enqueueNeighborChunks(level, data, chunk.getPos());
+        }
+
+        if (terraformChanged) {
             refreshChunkLighting(chunk, level);
         }
+
+        releaseChunkGate(level, chunk, true);
 
         if (AtmosphereConfig.DEBUG_LOGGING.get()) {
             List<String> summaries = new ArrayList<>();
@@ -744,6 +764,75 @@ public final class TerraformSystem {
                 }
             }
         }
+    }
+
+    public static void gateChunkSend(ServerLevel level, ChunkPos pos) {
+        ChunkQueue queue = queueFor(level);
+        queue.markLoaded(pos.toLong());
+        Long2ObjectMap<ChunkGate> gates = gatedChunksFor(level);
+        if (gates.containsKey(pos.toLong())) {
+            return;
+        }
+
+        var holder = level.getChunkSource().chunkMap.getVisibleChunkIfPresent(pos.toLong());
+        if (holder == null) {
+            return;
+        }
+
+        CompletableFuture<Void> gateFuture = new CompletableFuture<>();
+        holder.addSendDependency(gateFuture);
+        gates.put(pos.toLong(), new ChunkGate(gateFuture, level.getGameTime()));
+    }
+
+    private static void clearChunkGate(ServerLevel level, ChunkPos pos) {
+        Long2ObjectMap<ChunkGate> gates = gatedChunksFor(level);
+        ChunkGate gate = gates.remove(pos.toLong());
+        if (gate != null && !gate.future.isDone()) {
+            gate.future.complete(null);
+        }
+    }
+
+    private static void tickGatedChunks(ServerLevel level) {
+        Long2ObjectMap<ChunkGate> gates = gatedChunksFor(level);
+        if (gates.isEmpty()) {
+            return;
+        }
+
+        long now = level.getGameTime();
+        for (Long2ObjectMap.Entry<ChunkGate> entry : gates.long2ObjectEntrySet()) {
+            ChunkGate gate = entry.getValue();
+            if (!gate.timedOut && now - gate.startTick >= GATE_TIMEOUT_TICKS) {
+                Atmosphere.LOGGER.warn(
+                    "Terraform gating exceeded {} ticks for chunk {} in {}. Releasing send gate early.",
+                    GATE_TIMEOUT_TICKS,
+                    new ChunkPos(entry.getLongKey()),
+                    level.dimension().location());
+                gate.timedOut = true;
+                if (!gate.future.isDone()) {
+                    gate.future.complete(null);
+                }
+            }
+        }
+    }
+
+    private static void releaseChunkGate(ServerLevel level, LevelChunk chunk, boolean resend) {
+        Long2ObjectMap<ChunkGate> gates = gatedChunksFor(level);
+        ChunkGate gate = gates.remove(chunk.getPos().toLong());
+        if (gate == null) {
+            return;
+        }
+
+        if (!gate.future.isDone()) {
+            gate.future.complete(null);
+        }
+
+        if (resend) {
+            resendChunkToWatchers(chunk, level);
+        }
+    }
+
+    private static Long2ObjectMap<ChunkGate> gatedChunksFor(ServerLevel level) {
+        return GATED_CHUNKS.computeIfAbsent(level.dimension(), key -> new Long2ObjectOpenHashMap<>());
     }
 
     private static void prioritizePlayerChunks(ServerLevel level, ChunkQueue queue, TerraformIndexData data, int waterLevel,
@@ -1703,6 +1792,17 @@ public final class TerraformSystem {
 
         ChunkWork(int chunkX, int chunkZ) {
             this.pos = new ChunkPos(chunkX, chunkZ);
+        }
+    }
+
+    private static final class ChunkGate {
+        private final CompletableFuture<Void> future;
+        private final long startTick;
+        private boolean timedOut;
+
+        private ChunkGate(CompletableFuture<Void> future, long startTick) {
+            this.future = future;
+            this.startTick = startTick;
         }
     }
 }
