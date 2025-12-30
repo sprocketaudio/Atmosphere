@@ -17,6 +17,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.BiomeTags;
 import net.minecraft.tags.FluidTags;
+import net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
@@ -628,6 +629,16 @@ public final class TerraformSystem {
         }
 
         return cleared;
+    }
+
+    public static void resendChunkToWatchers(LevelChunk chunk, ServerLevel level) {
+        ChunkPos pos = chunk.getPos();
+        level.getChunkSource().chunkMap.waitForLightBeforeSending(pos, 0);
+        for (ServerPlayer player : level.getChunkSource().chunkMap.getPlayers(pos, false)) {
+            player.connection.send(chunk.getAuxLightManager(pos).sendLightDataTo(
+                new ClientboundLevelChunkWithLightPacket(chunk, level.getLightEngine(), null, null)
+            ));
+        }
     }
 
     private static void cleanupSurfaceWater(LevelChunk chunk, ServerLevel level, int waterLevelY) {

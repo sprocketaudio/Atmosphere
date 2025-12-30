@@ -42,8 +42,11 @@ public class TerraformIndexEvents {
         TerraformIndexData.get(serverLevel).clearChunkState(levelChunk.getPos().toLong());
         if (shouldProcessImmediately(serverLevel, levelChunk)) {
             int waterLevelY = TerraformIndexData.get(serverLevel).getWaterLevelY();
-            TerraformSystem.drainSurfaceWater(levelChunk, serverLevel, waterLevelY);
+            int drained = TerraformSystem.drainSurfaceWater(levelChunk, serverLevel, waterLevelY);
             TerraformSystem.refreshChunkLighting(levelChunk, serverLevel);
+            if (drained > 0) {
+                TerraformSystem.resendChunkToWatchers(levelChunk, serverLevel);
+            }
             TerraformSystem.enqueueImmediate(serverLevel, levelChunk.getPos());
         } else {
             TerraformSystem.refreshChunkLighting(levelChunk, serverLevel);
