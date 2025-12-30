@@ -586,6 +586,13 @@ public final class TerraformSystem {
                 }
             }
         }
+
+        for (long chunkKey : queue.loadedKeys()) {
+            if (!queue.hasTask(chunkKey)
+                && needsProcessing(data, chunkKey, waterLevel, grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
+                queue.ensureTask(chunkKey);
+            }
+        }
     }
 
     private static int transformSurfaceDirtToGrass(LevelChunk chunk, ServerLevel level) {
@@ -1475,6 +1482,10 @@ public final class TerraformSystem {
 
         boolean hasTask(long chunkKey) {
             return tasks.containsKey(chunkKey);
+        }
+
+        Iterable<Long> loadedKeys() {
+            return loaded;
         }
     }
 
