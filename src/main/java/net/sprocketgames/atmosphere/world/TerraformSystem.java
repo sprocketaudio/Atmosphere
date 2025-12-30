@@ -699,7 +699,7 @@ public final class TerraformSystem {
                 }
 
                 int neighborWorldY = minY + ny;
-                if (neighborWorldY > worldY && !skyExposed[(nx << 4) | nz]) {
+                if (neighborWorldY > worldY && !skyExposed[(x << 4) | z]) {
                     continue;
                 }
                 if (neighborWorldY > maxY) {
