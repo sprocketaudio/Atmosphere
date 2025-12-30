@@ -42,7 +42,11 @@ public class TerraformIndexEvents {
         TerraformIndexData.get(serverLevel).clearChunkState(levelChunk.getPos().toLong());
         TerraformSystem.refreshChunkLighting(levelChunk, serverLevel);
         TerraformSystem.markLoaded(serverLevel, levelChunk.getPos());
-        TerraformSystem.processChunkNow(serverLevel, levelChunk);
+        if (shouldProcessImmediately(serverLevel, levelChunk)) {
+            TerraformSystem.processChunkNow(serverLevel, levelChunk);
+        } else {
+            TerraformSystem.enqueue(serverLevel, levelChunk.getPos());
+        }
     }
 
     public static void onChunkUnload(ChunkEvent.Unload event) {
@@ -59,5 +63,25 @@ public class TerraformIndexEvents {
         }
 
         TerraformSystem.unload(serverLevel, levelChunk.getPos());
+    }
+
+    private static boolean shouldProcessImmediately(ServerLevel level, LevelChunk chunk) {
+        if (level.players().isEmpty()) {
+            return false;
+        }
+
+        int viewDistance = Math.max(0, level.getServer().getPlayerList().getViewDistance());
+        int chunkX = chunk.getPos().x;
+        int chunkZ = chunk.getPos().z;
+
+        for (ServerPlayer player : level.players()) {
+            int dx = Math.abs(chunkX - player.chunkPosition().x);
+            int dz = Math.abs(chunkZ - player.chunkPosition().z);
+            if (Math.max(dx, dz) <= viewDistance) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
