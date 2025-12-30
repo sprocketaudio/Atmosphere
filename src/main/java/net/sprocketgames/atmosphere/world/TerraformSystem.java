@@ -576,7 +576,6 @@ public final class TerraformSystem {
 
         int worldBaseX = chunk.getPos().getMinBlockX();
         int worldBaseZ = chunk.getPos().getMinBlockZ();
-        int[] surfaceYs = new int[16 * 16];
         boolean[] skyExposed = new boolean[16 * 16];
 
         for (int x = 0; x < 16; x++) {
@@ -584,7 +583,6 @@ public final class TerraformSystem {
             for (int z = 0; z < 16; z++) {
                 int worldZ = worldBaseZ + z;
                 int surfaceY = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, x, z);
-                surfaceYs[(x << 4) | z] = surfaceY;
                 boolean hasSky = surfaceY <= maxY;
                 skyExposed[(x << 4) | z] = hasSky;
                 if (!hasSky) {
@@ -651,9 +649,12 @@ public final class TerraformSystem {
             int localY = unpackFloodY(packed);
             int worldY = minY + localY;
             BlockPos pos = new BlockPos(worldBaseX + x, worldY, worldBaseZ + z);
-            BlockState state = level.getBlockState(pos);
+            BlockState state = getChunkBlockState(chunk, worldY, x, z);
+            if (state == null) {
+                continue;
+            }
 
-            if (state.isAir()) {
+            if (isWaterFillReplaceable(state)) {
                 int sectionIndex = chunk.getSectionIndex(worldY);
                 if (sectionIndex >= 0 && sectionIndex < chunk.getSectionsCount()) {
                     LevelChunkSection section = chunk.getSection(sectionIndex);
@@ -665,7 +666,9 @@ public final class TerraformSystem {
                     }
                     level.getChunkSource().blockChanged(pos);
                     level.getChunkSource().getLightEngine().checkBlock(pos);
-                    level.scheduleTick(pos, Fluids.WATER, 0);
+                    if (touchesLava(level, pos)) {
+                        level.scheduleTick(pos, Fluids.WATER, 0);
+                    }
                     placed++;
                 }
             } else if (!state.is(Blocks.WATER)) {
@@ -694,9 +697,11 @@ public final class TerraformSystem {
                     continue;
                 }
 
-                neighborPos.set(worldBaseX + nx, minY + ny, worldBaseZ + nz);
-                BlockState neighborState = level.getBlockState(neighborPos);
-                if (neighborState.isAir() || neighborState.is(Blocks.WATER)) {
+                BlockState neighborState = getChunkBlockState(chunk, minY + ny, nx, nz);
+                if (neighborState == null) {
+                    continue;
+                }
+                if (isWaterFillPassable(neighborState)) {
                     visited[neighborIndex] = true;
                     queue.add(neighborIndex);
                 }
@@ -708,6 +713,34 @@ public final class TerraformSystem {
         }
 
         return placed;
+    }
+
+    private static BlockState getChunkBlockState(LevelChunk chunk, int worldY, int x, int z) {
+        int sectionIndex = chunk.getSectionIndex(worldY);
+        if (sectionIndex < 0 || sectionIndex >= chunk.getSectionsCount()) {
+            return null;
+        }
+        LevelChunkSection section = chunk.getSection(sectionIndex);
+        return section.getBlockState(x, worldY & 15, z);
+    }
+
+    private static boolean isWaterFillReplaceable(BlockState state) {
+        return state.isAir() || state.is(Blocks.GLOW_LICHEN);
+    }
+
+    private static boolean isWaterFillPassable(BlockState state) {
+        return state.isAir() || state.is(Blocks.WATER) || state.is(Blocks.GLOW_LICHEN);
+    }
+
+    private static boolean touchesLava(ServerLevel level, BlockPos pos) {
+        BlockPos.MutableBlockPos neighbor = new BlockPos.MutableBlockPos();
+        for (int i = 0; i < 6; i++) {
+            neighbor.set(pos.getX() + OFFSETS_X[i], pos.getY() + OFFSETS_Y[i], pos.getZ() + OFFSETS_Z[i]);
+            if (level.getFluidState(neighbor).is(FluidTags.LAVA)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void seedFromBoundaryWater(LevelChunk chunk, boolean[] visited, ArrayDeque<Integer> queue,
