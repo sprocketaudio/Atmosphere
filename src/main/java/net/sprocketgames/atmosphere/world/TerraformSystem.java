@@ -772,20 +772,25 @@ public final class TerraformSystem {
 
         int minSection = neighbor.getMinSection();
         int maxSection = neighbor.getMaxSection();
-        int localEdge = positiveEdge ? 15 : 0;
+        int neighborEdge = positiveEdge ? 0 : 15;
+        int targetEdge = positiveEdge ? 15 : 0;
         int minLocal = 0;
         int maxLocal = 15;
 
         for (int local = minLocal; local <= maxLocal; local++) {
-            int x = zEdge ? local : localEdge;
-            int z = zEdge ? localEdge : local;
-            seedFromNeighborColumn(neighbor, chunk, visited, queue, minY, maxY, x, z, minSection, maxSection);
+            int neighborXLocal = zEdge ? local : neighborEdge;
+            int neighborZLocal = zEdge ? neighborEdge : local;
+            int targetXLocal = zEdge ? local : targetEdge;
+            int targetZLocal = zEdge ? targetEdge : local;
+            seedFromNeighborColumn(neighbor, chunk, visited, queue, minY, maxY,
+                neighborXLocal, neighborZLocal, targetXLocal, targetZLocal, minSection, maxSection);
         }
     }
 
     private static void seedFromNeighborColumn(LevelChunk neighbor, LevelChunk chunk, boolean[] visited,
                                                ArrayDeque<Integer> queue, int minY, int maxY,
-                                               int x, int z, int minSection, int maxSection) {
+                                               int neighborX, int neighborZ, int targetX, int targetZ,
+                                               int minSection, int maxSection) {
         for (int sectionY = minSection; sectionY < maxSection; sectionY++) {
             LevelChunkSection section = neighbor.getSection(neighbor.getSectionIndexFromSectionY(sectionY));
             if (!section.maybeHas(state -> state.getFluidState().is(FluidTags.WATER))) {
@@ -798,24 +803,22 @@ public final class TerraformSystem {
                 if (worldY < minY || worldY > maxY) {
                     continue;
                 }
-                BlockState neighborState = section.getBlockState(x, y, z);
+                BlockState neighborState = section.getBlockState(neighborX, y, neighborZ);
                 if (!neighborState.getFluidState().is(FluidTags.WATER)) {
                     continue;
                 }
 
-                int localX = x;
-                int localZ = z;
                 int sectionIndex = chunk.getSectionIndex(worldY);
                 if (sectionIndex < 0 || sectionIndex >= chunk.getSectionsCount()) {
                     continue;
                 }
                 LevelChunkSection targetSection = chunk.getSection(sectionIndex);
-                BlockState currentState = targetSection.getBlockState(localX, worldY & 15, localZ);
+                BlockState currentState = targetSection.getBlockState(targetX, worldY & 15, targetZ);
                 if (!currentState.isAir() && !currentState.is(Blocks.WATER)) {
                     continue;
                 }
 
-                int seedIndex = packFloodIndex(localX, worldY - minY, localZ);
+                int seedIndex = packFloodIndex(targetX, worldY - minY, targetZ);
                 if (!visited[seedIndex]) {
                     visited[seedIndex] = true;
                     queue.add(seedIndex);
