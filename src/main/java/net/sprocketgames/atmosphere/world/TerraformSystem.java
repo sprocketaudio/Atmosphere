@@ -618,8 +618,11 @@ public final class TerraformSystem {
                     }
                     int surfaceY = surfaceYs[columnIndex];
                     cursor.set(worldX, surfaceY, worldBaseZ + z);
-                    level.getChunkSource().blockChanged(cursor);
                     lightEngine.checkBlock(cursor);
+                    if (surfaceY != waterLevelY) {
+                        cursor.set(worldX, waterLevelY, worldBaseZ + z);
+                        lightEngine.checkBlock(cursor);
+                    }
                 }
             }
         }
