@@ -489,6 +489,7 @@ public final class TerraformSystem {
         if (removed > 0 || placed > 0) {
             Heightmap.primeHeightmaps(chunk, EnumSet.of(Heightmap.Types.WORLD_SURFACE, Heightmap.Types.OCEAN_FLOOR));
             refreshChunkLighting(chunk, level);
+            enqueueNeighborChunks(level, chunk.getPos());
         }
         return new WaterResult(placed, removed);
     }
@@ -893,6 +894,24 @@ public final class TerraformSystem {
                     lightEngine.checkBlock(cursor);
                 }
             }
+        }
+    }
+
+    private static void enqueueNeighborChunks(ServerLevel level, ChunkPos pos) {
+        int baseX = pos.x;
+        int baseZ = pos.z;
+        enqueueNeighbor(level, new ChunkPos(baseX + 1, baseZ));
+        enqueueNeighbor(level, new ChunkPos(baseX - 1, baseZ));
+        enqueueNeighbor(level, new ChunkPos(baseX, baseZ + 1));
+        enqueueNeighbor(level, new ChunkPos(baseX, baseZ - 1));
+    }
+
+    private static void enqueueNeighbor(ServerLevel level, ChunkPos pos) {
+        TerraformIndexData data = TerraformIndexData.get(level);
+        data.clearChunkWaterProcessed(pos.toLong());
+        LevelChunk chunk = level.getChunkSource().getChunkNow(pos.x, pos.z);
+        if (chunk != null) {
+            enqueue(level, pos);
         }
     }
 
