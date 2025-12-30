@@ -17,7 +17,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.BiomeTags;
 import net.minecraft.tags.FluidTags;
-import net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
@@ -33,15 +32,14 @@ import net.sprocketgames.atmosphere.config.AtmosphereConfig;
 import net.sprocketgames.atmosphere.data.TerraformIndexData;
 
 /**
- * Handles throttled terrain updates (water, surface grass, and vegetation) on a chunk-by-chunk basis.
+ * Handles throttled terrain updates (no-water surface pass, surface grass, and vegetation) on a chunk-by-chunk basis.
  */
 public final class TerraformSystem {
     private static final int MAX_CHUNKS_PER_TICK = 4;
     private static final int MAX_PRIORITY_CHUNKS_PER_TICK = 8;
-    private static final int SURFACE_DRAIN_DEPTH = 3;
-    private static final int[] OFFSETS_X = {1, -1, 0, 0, 0, 0};
-    private static final int[] OFFSETS_Y = {0, 0, 1, -1, 0, 0};
-    private static final int[] OFFSETS_Z = {0, 0, 0, 0, 1, -1};
+    private static final int SURFACE_DEPTH = 3;
+    private static final int BEACH_DEPTH = 2;
+    private static final int OCEAN_FLOOR_DEPTH = 4;
 
     private static final Map<ResourceKey<Level>, ChunkQueue> QUEUES = new HashMap<>();
 
@@ -63,7 +61,8 @@ public final class TerraformSystem {
     public static void enqueue(ServerLevel level, ChunkPos pos) {
         ChunkQueue queue = queueFor(level);
         TerraformIndexData data = TerraformIndexData.get(level);
-        int waterLevel = data.getWaterLevelY();
+        int seaLevel = data.getWaterLevelY();
+        boolean noWaterWorldgen = AtmosphereConfig.NO_WATER_WORLDGEN.get();
         boolean grassifyEnabled = data.isGrassifyEnabled();
         boolean grassVegEnabled = data.isGrassVegetationEnabled();
         boolean flowerVegEnabled = data.isFlowerVegetationEnabled();
@@ -71,7 +70,7 @@ public final class TerraformSystem {
         long chunkKey = pos.toLong();
 
         queue.markLoaded(chunkKey);
-        if (needsProcessing(data, chunkKey, waterLevel, grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
+        if (needsProcessing(data, chunkKey, seaLevel, noWaterWorldgen, grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
             queue.ensureTask(chunkKey);
             queue.prioritize(chunkKey);
         } else if (!queue.hasTask(chunkKey)) {
@@ -83,7 +82,8 @@ public final class TerraformSystem {
     public static void enqueueImmediate(ServerLevel level, ChunkPos pos) {
         ChunkQueue queue = queueFor(level);
         TerraformIndexData data = TerraformIndexData.get(level);
-        int waterLevel = data.getWaterLevelY();
+        int seaLevel = data.getWaterLevelY();
+        boolean noWaterWorldgen = AtmosphereConfig.NO_WATER_WORLDGEN.get();
         boolean grassifyEnabled = data.isGrassifyEnabled();
         boolean grassVegEnabled = data.isGrassVegetationEnabled();
         boolean flowerVegEnabled = data.isFlowerVegetationEnabled();
@@ -91,7 +91,7 @@ public final class TerraformSystem {
         long chunkKey = pos.toLong();
 
         queue.markLoaded(chunkKey);
-        if (needsProcessing(data, chunkKey, waterLevel, grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
+        if (needsProcessing(data, chunkKey, seaLevel, noWaterWorldgen, grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
             queue.ensureTask(chunkKey);
             queue.prioritize(chunkKey);
         } else if (!queue.hasTask(chunkKey)) {
@@ -106,14 +106,15 @@ public final class TerraformSystem {
 
     public static void processChunkNow(ServerLevel level, LevelChunk chunk) {
         TerraformIndexData data = TerraformIndexData.get(level);
-        int waterLevel = data.getWaterLevelY();
+        int seaLevel = data.getWaterLevelY();
+        boolean noWaterWorldgen = AtmosphereConfig.NO_WATER_WORLDGEN.get();
         boolean grassifyEnabled = data.isGrassifyEnabled();
         boolean grassVegEnabled = data.isGrassVegetationEnabled();
         boolean flowerVegEnabled = data.isFlowerVegetationEnabled();
         boolean saplingEnabled = data.isSaplingEnabled();
         long chunkKey = chunk.getPos().toLong();
 
-        processChunk(level, data, chunk, chunkKey, waterLevel, grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled);
+        processChunk(level, data, chunk, chunkKey, seaLevel, noWaterWorldgen, grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled);
     }
 
     public static void unload(ServerLevel level, ChunkPos pos) {
@@ -180,10 +181,11 @@ public final class TerraformSystem {
         return QUEUES.computeIfAbsent(level.dimension(), key -> new ChunkQueue());
     }
 
-    private static boolean needsProcessing(TerraformIndexData data, long chunkKey, int waterLevel,
-                                           boolean grassifyEnabled, boolean grassVegEnabled, boolean flowerVegEnabled,
+    private static boolean needsProcessing(TerraformIndexData data, long chunkKey, int seaLevel,
+                                           boolean noWaterWorldgen, boolean grassifyEnabled,
+                                           boolean grassVegEnabled, boolean flowerVegEnabled,
                                            boolean saplingEnabled) {
-        return !data.isChunkWaterProcessed(chunkKey, waterLevel)
+        return (noWaterWorldgen && !data.isChunkSurfaceProcessed(chunkKey, seaLevel))
             || !data.isChunkGrassProcessed(chunkKey, grassifyEnabled)
             || !data.isChunkVegetationProcessed(chunkKey, grassVegEnabled, flowerVegEnabled)
             || !data.isChunkSaplingProcessed(chunkKey, saplingEnabled);
@@ -192,13 +194,14 @@ public final class TerraformSystem {
     private static void processQueue(ServerLevel level) {
         ChunkQueue queue = queueFor(level);
         TerraformIndexData data = TerraformIndexData.get(level);
-        int waterLevel = data.getWaterLevelY();
+        int seaLevel = data.getWaterLevelY();
+        boolean noWaterWorldgen = AtmosphereConfig.NO_WATER_WORLDGEN.get();
         boolean grassifyEnabled = data.isGrassifyEnabled();
         boolean grassVegEnabled = data.isGrassVegetationEnabled();
         boolean flowerVegEnabled = data.isFlowerVegetationEnabled();
         boolean saplingEnabled = data.isSaplingEnabled();
 
-        prioritizePlayerChunks(level, queue, data, waterLevel, grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled);
+        prioritizePlayerChunks(level, queue, data, seaLevel, noWaterWorldgen, grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled);
 
         if (queue.isEmpty()) {
             return;
@@ -238,36 +241,38 @@ public final class TerraformSystem {
                 continue;
             }
 
-            processChunk(level, data, chunk, chunkKey, waterLevel, grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled);
+            processChunk(level, data, chunk, chunkKey, seaLevel, noWaterWorldgen, grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled);
             queue.finish(chunkKey);
             processedChunks++;
         }
     }
 
     private static void processChunk(ServerLevel level, TerraformIndexData data, LevelChunk chunk, long chunkKey,
-                                     int waterLevel, boolean grassifyEnabled, boolean grassVegEnabled,
+                                     int seaLevel, boolean noWaterWorldgen, boolean grassifyEnabled,
+                                     boolean grassVegEnabled,
                                      boolean flowerVegEnabled, boolean saplingEnabled) {
-        boolean waterNeeded = !data.isChunkWaterProcessed(chunkKey, waterLevel);
+        boolean surfaceNeeded = noWaterWorldgen && !data.isChunkSurfaceProcessed(chunkKey, seaLevel);
         boolean grassNeeded = !data.isChunkGrassProcessed(chunkKey, grassifyEnabled);
         boolean vegetationNeeded = !data.isChunkVegetationProcessed(chunkKey, grassVegEnabled, flowerVegEnabled);
         boolean saplingNeeded = !data.isChunkSaplingProcessed(chunkKey, saplingEnabled);
-        boolean processedWater = false;
+        boolean processedSurface = false;
         boolean processedGrass = false;
         boolean processedVegetation = false;
         boolean processedSaplings = false;
-        int placed = 0;
-        int removed = 0;
-        int surfaceChanged = 0;
+        SurfaceResult surfaceResult = new SurfaceResult(0, 0);
+        int grassChanged = 0;
         VegetationResult vegetationResult = new VegetationResult(0, 0, 0);
         SaplingResult saplingResult = new SaplingResult(0, 0, 0);
-        boolean waterUpdated = false;
 
-        if (!waterNeeded && !grassNeeded && !vegetationNeeded && !saplingNeeded) {
+        if (!surfaceNeeded && !grassNeeded && !vegetationNeeded && !saplingNeeded) {
             return;
         }
 
-        int previousWaterLevel = data.getProcessedWaterLevel(chunkKey);
-        boolean waterLowering = waterNeeded && previousWaterLevel != Integer.MIN_VALUE && waterLevel < previousWaterLevel;
+        if (surfaceNeeded) {
+            surfaceResult = applyNoWaterSurface(chunk, level, seaLevel);
+            processedSurface = true;
+            data.markChunkSurfaceProcessed(chunkKey, seaLevel);
+        }
 
         if (saplingNeeded && !saplingEnabled) {
             SaplingResult result = processSaplingsInChunk(chunk, level, false);
@@ -285,32 +290,16 @@ public final class TerraformSystem {
         }
 
         if (grassNeeded && !grassifyEnabled) {
-            surfaceChanged = transformSurfaceGrassToDirt(chunk, level);
+            grassChanged = transformSurfaceGrassToDirt(chunk, level);
             processedGrass = true;
             data.markChunkGrassProcessed(chunkKey, false);
         }
 
-        if (waterLowering) {
-            removed = fastDrainChunk(chunk, waterLevel, level);
-            processedWater = true;
-            waterUpdated = removed > 0;
-            data.markChunkWaterProcessed(chunkKey, waterLevel);
-        }
-
-        if (waterNeeded && !waterLowering) {
-            boolean allowWaterPlacement = previousWaterLevel == Integer.MIN_VALUE || waterLevel >= previousWaterLevel;
-            removed = fastDrainChunk(chunk, waterLevel, level);
-            placed = allowWaterPlacement ? fastFillChunk(chunk, waterLevel, level) : 0;
-            processedWater = true;
-            waterUpdated = removed > 0 || placed > 0;
-            data.markChunkWaterProcessed(chunkKey, waterLevel);
-        }
-
         if (grassNeeded && grassifyEnabled) {
-            surfaceChanged = transformSurfaceDirtToGrass(chunk, level);
+            grassChanged = transformSurfaceDirtToGrass(chunk, level);
             processedGrass = true;
             data.markChunkGrassProcessed(chunkKey, true);
-            if (surfaceChanged > 0 && (grassVegEnabled || flowerVegEnabled)) {
+            if (grassChanged > 0 && (grassVegEnabled || flowerVegEnabled)) {
                 vegetationNeeded = true;
             }
         }
@@ -330,25 +319,19 @@ public final class TerraformSystem {
             data.markChunkSaplingProcessed(chunkKey, true);
         }
 
-        if (waterUpdated) {
-            cleanupSurfaceWater(chunk, level, waterLevel);
-            enqueueNeighborChunks(level, data, chunk.getPos());
-            refreshChunkLighting(chunk, level);
-        }
-
         if (AtmosphereConfig.DEBUG_LOGGING.get()) {
             List<String> summaries = new ArrayList<>();
-            if (processedWater) {
-                StringBuilder waterSummary = new StringBuilder("water placed=")
-                    .append(placed)
-                    .append(" removed=")
-                    .append(removed);
-                summaries.add(waterSummary.toString());
+            if (processedSurface) {
+                String surfaceSummary = String.format(
+                    "no-water surface updated=%d water-removed=%d",
+                    surfaceResult.surfaceChanged,
+                    surfaceResult.waterRemoved);
+                summaries.add(surfaceSummary);
             }
             if (processedGrass) {
                 summaries.add(String.format("surface %s=%d",
                     grassifyEnabled ? "dirt->grass" : "grass->dirt",
-                    surfaceChanged));
+                    grassChanged));
             }
             if (processedVegetation) {
                 String vegetationSummary = String.format(
@@ -378,56 +361,58 @@ public final class TerraformSystem {
         }
     }
 
-    private static int fastDrainChunk(LevelChunk chunk, int waterLevelY, ServerLevel level) {
+    // Migration note: enabling no-water worldgen on existing worlds requires re-queuing loaded chunks
+    // so the virtual sea level surface pass can run (e.g., via /terraform setTi or re-login).
+    private static SurfaceResult applyNoWaterSurface(LevelChunk chunk, ServerLevel level, int seaLevel) {
+        int waterRemoved = removeWaterBlocks(chunk, level);
+        int surfaceChanged = applyVirtualSeaLevelSurface(chunk, level, seaLevel);
+        return new SurfaceResult(surfaceChanged, waterRemoved);
+    }
+
+    private static int removeWaterBlocks(LevelChunk chunk, ServerLevel level) {
         int removed = 0;
-        int minSection = chunk.getMinSection();
-        int maxSection = chunk.getMaxSection();
-        int startSection = Math.max(minSection, SectionPos.blockToSectionCoord(waterLevelY));
         BlockState air = Blocks.AIR.defaultBlockState();
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        var lightEngine = level.getChunkSource().getLightEngine();
 
-        for (int sectionY = startSection; sectionY < maxSection; sectionY++) {
-            int sectionMinY = SectionPos.sectionToBlockCoord(sectionY);
-            int sectionMaxY = sectionMinY + 15;
-            if (sectionMaxY <= waterLevelY) {
-                continue;
-            }
+        int minSection = chunk.getMinSection();
+        int maxSection = chunk.getMaxSection();
+        int worldBaseX = chunk.getPos().getMinBlockX();
+        int worldBaseZ = chunk.getPos().getMinBlockZ();
 
+        for (int sectionY = minSection; sectionY < maxSection; sectionY++) {
             LevelChunkSection section = chunk.getSection(chunk.getSectionIndexFromSectionY(sectionY));
-            if (!section.maybeHas(state -> state.getFluidState().is(FluidTags.WATER) || (state.hasProperty(BlockStateProperties.WATERLOGGED) && state.getValue(BlockStateProperties.WATERLOGGED)))) {
+            if (!section.maybeHas(state -> state.getFluidState().is(FluidTags.WATER)
+                || (state.hasProperty(BlockStateProperties.WATERLOGGED) && state.getValue(BlockStateProperties.WATERLOGGED)))) {
                 continue;
             }
 
-            int minLocalY = Math.max(0, waterLevelY - sectionMinY + 1);
-            int worldBaseX = chunk.getPos().getMinBlockX();
-            int worldBaseZ = chunk.getPos().getMinBlockZ();
+            int sectionMinY = SectionPos.sectionToBlockCoord(sectionY);
             section.acquire();
             try {
-                for (int y = minLocalY; y < 16; y++) {
+                for (int y = 0; y < 16; y++) {
                     int worldY = sectionMinY + y;
                     for (int x = 0; x < 16; x++) {
                         int worldX = worldBaseX + x;
                         for (int z = 0; z < 16; z++) {
                             BlockState state = section.getBlockState(x, y, z);
-                            if (state.hasProperty(BlockStateProperties.WATERLOGGED) && state.getValue(BlockStateProperties.WATERLOGGED)) {
-                                BlockState cleared = state.setValue(BlockStateProperties.WATERLOGGED, false);
-                                section.setBlockState(x, y, z, cleared, false);
+                            boolean changed = false;
+                            if (state.hasProperty(BlockStateProperties.WATERLOGGED)
+                                && state.getValue(BlockStateProperties.WATERLOGGED)) {
+                                state = state.setValue(BlockStateProperties.WATERLOGGED, false);
+                                section.setBlockState(x, y, z, state, false);
+                                changed = true;
+                            } else if (state.getFluidState().is(FluidTags.WATER)) {
+                                section.setBlockState(x, y, z, air, false);
+                                changed = true;
+                            }
+
+                            if (changed) {
                                 cursor.set(worldX, worldY, worldBaseZ + z);
                                 level.getChunkSource().blockChanged(cursor);
-                                level.getChunkSource().getLightEngine().checkBlock(cursor);
+                                lightEngine.checkBlock(cursor);
                                 removed++;
-                                continue;
                             }
-
-                            if (!state.getFluidState().is(FluidTags.WATER)) {
-                                continue;
-                            }
-
-                            section.setBlockState(x, y, z, air, false);
-                            cursor.set(worldX, worldY, worldBaseZ + z);
-                            level.getChunkSource().blockChanged(cursor);
-                            level.getChunkSource().getLightEngine().checkBlock(cursor);
-                            removed++;
                         }
                     }
                 }
@@ -443,312 +428,131 @@ public final class TerraformSystem {
         return removed;
     }
 
-    private static int fastFillChunk(LevelChunk chunk, int waterLevelY, ServerLevel level) {
-        int placed = 0;
-        int minY = level.getMinBuildHeight();
-        int maxY = Math.min(waterLevelY, level.getMaxBuildHeight() - 1);
-        if (maxY < minY) {
-            return 0;
-        }
-
-        int height = maxY - minY + 1;
-        boolean[] visited = new boolean[16 * 16 * height];
-        java.util.ArrayDeque<Integer> queue = new java.util.ArrayDeque<>();
-        BlockState water = Blocks.WATER.defaultBlockState();
-
+    private static int applyVirtualSeaLevelSurface(LevelChunk chunk, ServerLevel level, int seaLevel) {
+        int changed = 0;
         int worldBaseX = chunk.getPos().getMinBlockX();
         int worldBaseZ = chunk.getPos().getMinBlockZ();
+        long seed = level.getSeed();
 
         for (int x = 0; x < 16; x++) {
             int worldX = worldBaseX + x;
             for (int z = 0; z < 16; z++) {
                 int worldZ = worldBaseZ + z;
-                BlockPos seedPos = new BlockPos(worldX, maxY, worldZ);
-                if (!level.canSeeSky(seedPos)) {
+                int surfaceY = chunk.getHeight(Heightmap.Types.OCEAN_FLOOR, x, z);
+                if (surfaceY < level.getMinBuildHeight() || surfaceY >= level.getMaxBuildHeight()) {
                     continue;
                 }
 
-                BlockState seedState = level.getBlockState(seedPos);
-                if (!seedState.isAir() && !seedState.is(Blocks.WATER)) {
+                Holder<Biome> biomeHolder = chunk.getNoiseBiome(x >> 2, surfaceY >> 2, z >> 2);
+                SurfaceMaterial material = pickSurfaceMaterial(biomeHolder, surfaceY, seaLevel, seed, worldX, worldZ);
+                if (material == null) {
                     continue;
                 }
 
-                int seedIndex = packFloodIndex(x, maxY - minY, z);
-                if (!visited[seedIndex]) {
-                    visited[seedIndex] = true;
-                    queue.add(seedIndex);
-                }
+                BlockPos surfacePos = new BlockPos(worldX, surfaceY, worldZ);
+                changed += replaceSurfaceColumn(chunk, level, surfacePos, material);
             }
         }
 
-        BlockPos.MutableBlockPos borderPos = new BlockPos.MutableBlockPos();
-        BlockPos.MutableBlockPos neighborPos = new BlockPos.MutableBlockPos();
-        for (int y = minY; y <= maxY; y++) {
-            int localY = y - minY;
-            for (int x = 0; x < 16; x++) {
-                borderPos.set(worldBaseX + x, y, worldBaseZ);
-                neighborPos.set(worldBaseX + x, y, worldBaseZ - 1);
-                seedFromNeighborWater(level, borderPos, neighborPos, visited, queue, x, localY, 0);
-
-                borderPos.set(worldBaseX + x, y, worldBaseZ + 15);
-                neighborPos.set(worldBaseX + x, y, worldBaseZ + 16);
-                seedFromNeighborWater(level, borderPos, neighborPos, visited, queue, x, localY, 15);
-            }
-            for (int z = 0; z < 16; z++) {
-                borderPos.set(worldBaseX, y, worldBaseZ + z);
-                neighborPos.set(worldBaseX - 1, y, worldBaseZ + z);
-                seedFromNeighborWater(level, borderPos, neighborPos, visited, queue, 0, localY, z);
-
-                borderPos.set(worldBaseX + 15, y, worldBaseZ + z);
-                neighborPos.set(worldBaseX + 16, y, worldBaseZ + z);
-                seedFromNeighborWater(level, borderPos, neighborPos, visited, queue, 15, localY, z);
-            }
-        }
-
-        while (!queue.isEmpty()) {
-            int packed = queue.removeFirst();
-            int x = unpackFloodX(packed);
-            int z = unpackFloodZ(packed);
-            int localY = unpackFloodY(packed);
-            int worldY = minY + localY;
-            BlockPos pos = new BlockPos(worldBaseX + x, worldY, worldBaseZ + z);
-            BlockState state = level.getBlockState(pos);
-
-            if (state.isAir()) {
-                int sectionIndex = chunk.getSectionIndex(worldY);
-                if (sectionIndex >= 0 && sectionIndex < chunk.getSectionsCount()) {
-                    LevelChunkSection section = chunk.getSection(sectionIndex);
-                    section.acquire();
-                    try {
-                        section.setBlockState(x, worldY & 15, z, water, false);
-                    } finally {
-                        section.release();
-                    }
-                    level.getChunkSource().blockChanged(pos);
-                    level.getChunkSource().getLightEngine().checkBlock(pos);
-                    placed++;
-                }
-            } else if (!state.is(Blocks.WATER)) {
-                continue;
-            }
-
-            for (int i = 0; i < 6; i++) {
-                int nx = x + OFFSETS_X[i];
-                int ny = localY + OFFSETS_Y[i];
-                int nz = z + OFFSETS_Z[i];
-
-                if (nx < 0 || nx >= 16 || nz < 0 || nz >= 16 || ny < 0 || ny >= height) {
-                    continue;
-                }
-
-                int neighborIndex = packFloodIndex(nx, ny, nz);
-                if (visited[neighborIndex]) {
-                    continue;
-                }
-
-                neighborPos.set(worldBaseX + nx, minY + ny, worldBaseZ + nz);
-                BlockState neighborState = level.getBlockState(neighborPos);
-                if (neighborState.isAir() || neighborState.is(Blocks.WATER)) {
-                    visited[neighborIndex] = true;
-                    queue.add(neighborIndex);
-                }
-            }
-        }
-
-        if (placed > 0) {
+        if (changed > 0) {
             chunk.setUnsaved(true);
         }
 
-        return placed;
+        return changed;
     }
 
-    public static int drainSurfaceWater(LevelChunk chunk, ServerLevel level, int waterLevelY) {
-        int cleared = 0;
-        BlockState air = Blocks.AIR.defaultBlockState();
-        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
-        int worldBaseX = chunk.getPos().getMinBlockX();
-        int worldBaseZ = chunk.getPos().getMinBlockZ();
+    private static SurfaceMaterial pickSurfaceMaterial(Holder<Biome> biomeHolder, int surfaceY, int seaLevel,
+                                                       long seed, int worldX, int worldZ) {
+        int depthBelowSea = seaLevel - surfaceY;
+        boolean isOcean = biomeHolder.is(BiomeTags.IS_OCEAN) || biomeHolder.is(BiomeTags.IS_DEEP_OCEAN);
+        boolean isRiver = biomeHolder.is(BiomeTags.IS_RIVER);
+        boolean isBeach = biomeHolder.is(BiomeTags.IS_BEACH);
+
+        if (depthBelowSea >= 0) {
+            if (depthBelowSea <= BEACH_DEPTH || isBeach || isRiver) {
+                return new SurfaceMaterial(Blocks.SAND.defaultBlockState(), OCEAN_FLOOR_DEPTH);
+            }
+            return pickOceanFloorMaterial(seed, worldX, worldZ);
+        }
+
+        if (Math.abs(depthBelowSea) <= BEACH_DEPTH && (isBeach || isOcean || isRiver)) {
+            return new SurfaceMaterial(Blocks.SAND.defaultBlockState(), SURFACE_DEPTH);
+        }
+
+        return null;
+    }
+
+    private static SurfaceMaterial pickOceanFloorMaterial(long seed, int worldX, int worldZ) {
+        java.util.Random random = new java.util.Random(seed ^ ((long) worldX * 341873128712L + (long) worldZ * 132897987541L));
+        float roll = random.nextFloat();
+        if (roll < 0.12f) {
+            return new SurfaceMaterial(Blocks.CLAY.defaultBlockState(), OCEAN_FLOOR_DEPTH);
+        }
+        if (roll < 0.32f) {
+            return new SurfaceMaterial(Blocks.GRAVEL.defaultBlockState(), OCEAN_FLOOR_DEPTH);
+        }
+        return new SurfaceMaterial(Blocks.SAND.defaultBlockState(), OCEAN_FLOOR_DEPTH);
+    }
+
+    private static int replaceSurfaceColumn(LevelChunk chunk, ServerLevel level, BlockPos surfacePos, SurfaceMaterial material) {
+        int changed = 0;
         int minBuildY = level.getMinBuildHeight();
-        int[] surfaceYs = new int[16 * 16];
-        boolean[] changedColumns = new boolean[16 * 16];
-
-        for (int x = 0; x < 16; x++) {
-            for (int z = 0; z < 16; z++) {
-                int surfaceY = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, x, z);
-                surfaceYs[(x << 4) | z] = surfaceY;
-                int minY = Math.max(minBuildY, surfaceY - SURFACE_DRAIN_DEPTH);
-                for (int y = surfaceY; y > waterLevelY && y >= minY; y--) {
-                    int sectionIndex = chunk.getSectionIndex(y);
-                    if (sectionIndex < 0 || sectionIndex >= chunk.getSectionsCount()) {
-                        continue;
-                    }
-
-                    LevelChunkSection section = chunk.getSection(sectionIndex);
-                    int localY = y & 15;
-                    section.acquire();
-                    try {
-                        BlockState state = section.getBlockState(x, localY, z);
-                        if (state.hasProperty(BlockStateProperties.WATERLOGGED)
-                            && state.getValue(BlockStateProperties.WATERLOGGED)) {
-                            BlockState clearedState = state.setValue(BlockStateProperties.WATERLOGGED, false);
-                            section.setBlockState(x, localY, z, clearedState, false);
-                        } else if (state.getFluidState().is(FluidTags.WATER)) {
-                            section.setBlockState(x, localY, z, air, false);
-                        } else {
-                            continue;
-                        }
-                    } finally {
-                        section.release();
-                    }
-
-                    changedColumns[(x << 4) | z] = true;
-                    cleared++;
-                }
-            }
-        }
-
-        if (cleared > 0) {
-            chunk.setUnsaved(true);
-            var lightEngine = level.getChunkSource().getLightEngine();
-            for (int x = 0; x < 16; x++) {
-                int worldX = worldBaseX + x;
-                for (int z = 0; z < 16; z++) {
-                    int columnIndex = (x << 4) | z;
-                    if (!changedColumns[columnIndex]) {
-                        continue;
-                    }
-                    int surfaceY = surfaceYs[columnIndex];
-                    cursor.set(worldX, surfaceY, worldBaseZ + z);
-                    lightEngine.checkBlock(cursor);
-                    if (surfaceY != waterLevelY) {
-                        cursor.set(worldX, waterLevelY, worldBaseZ + z);
-                        lightEngine.checkBlock(cursor);
-                    }
-                }
-            }
-        }
-
-        return cleared;
-    }
-
-    public static void resendChunkToWatchers(LevelChunk chunk, ServerLevel level) {
-        ChunkPos pos = chunk.getPos();
-        level.getChunkSource().chunkMap.waitForLightBeforeSending(pos, 0);
-        for (ServerPlayer player : level.getChunkSource().chunkMap.getPlayers(pos, false)) {
-            player.connection.send(chunk.getAuxLightManager(pos).sendLightDataTo(
-                new ClientboundLevelChunkWithLightPacket(chunk, level.getLightEngine(), null, null)
-            ));
-        }
-    }
-
-    private static void cleanupSurfaceWater(LevelChunk chunk, ServerLevel level, int waterLevelY) {
-        int sectionIndex = chunk.getSectionIndex(waterLevelY);
-        if (sectionIndex < 0 || sectionIndex >= chunk.getSectionsCount()) {
-            return;
-        }
-
-        LevelChunkSection section = chunk.getSection(sectionIndex);
-        int localY = waterLevelY & 15;
-        int worldBaseX = chunk.getPos().getMinBlockX();
-        int worldBaseZ = chunk.getPos().getMinBlockZ();
-        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
-        boolean changed = false;
-
-        section.acquire();
-        try {
-            for (int x = 0; x < 16; x++) {
-                int worldX = worldBaseX + x;
-                for (int z = 0; z < 16; z++) {
-                    BlockState state = section.getBlockState(x, localY, z);
-                    if (state.getFluidState().is(FluidTags.WATER) && !state.getFluidState().isSource()) {
-                        section.setBlockState(x, localY, z, Blocks.AIR.defaultBlockState(), false);
-                        cursor.set(worldX, waterLevelY, worldBaseZ + z);
-                        level.getChunkSource().blockChanged(cursor);
-                        level.getChunkSource().getLightEngine().checkBlock(cursor);
-                        changed = true;
-                    } else if (state.hasProperty(BlockStateProperties.WATERLOGGED)
-                        && state.getValue(BlockStateProperties.WATERLOGGED)) {
-                        BlockState cleared = state.setValue(BlockStateProperties.WATERLOGGED, false);
-                        section.setBlockState(x, localY, z, cleared, false);
-                        cursor.set(worldX, waterLevelY, worldBaseZ + z);
-                        level.getChunkSource().blockChanged(cursor);
-                        level.getChunkSource().getLightEngine().checkBlock(cursor);
-                        changed = true;
-                    }
-                }
-            }
-        } finally {
-            section.release();
-        }
-
-        if (changed) {
-            chunk.setUnsaved(true);
-        }
-    }
-
-    private static void enqueueNeighborChunks(ServerLevel level, TerraformIndexData data, ChunkPos pos) {
-        int baseX = pos.x;
-        int baseZ = pos.z;
-        enqueueNeighbor(level, data, new ChunkPos(baseX + 1, baseZ));
-        enqueueNeighbor(level, data, new ChunkPos(baseX - 1, baseZ));
-        enqueueNeighbor(level, data, new ChunkPos(baseX, baseZ + 1));
-        enqueueNeighbor(level, data, new ChunkPos(baseX, baseZ - 1));
-    }
-
-    private static void enqueueNeighbor(ServerLevel level, TerraformIndexData data, ChunkPos pos) {
-        data.clearChunkWaterProcessed(pos.toLong());
-        LevelChunk chunk = level.getChunkSource().getChunkNow(pos.x, pos.z);
-        if (chunk != null) {
-            enqueue(level, pos);
-        }
-    }
-
-    private static void seedFromNeighborWater(ServerLevel level, BlockPos borderPos, BlockPos neighborPos,
-                                              boolean[] visited, java.util.ArrayDeque<Integer> queue,
-                                              int x, int localY, int z) {
-        BlockState neighborState = level.getBlockState(neighborPos);
-        if (!neighborState.is(Blocks.WATER)) {
-            return;
-        }
-
-        BlockState currentState = level.getBlockState(borderPos);
-        if (!currentState.isAir() && !currentState.is(Blocks.WATER)) {
-            return;
-        }
-
-        int seedIndex = packFloodIndex(x, localY, z);
-        if (!visited[seedIndex]) {
-            visited[seedIndex] = true;
-            queue.add(seedIndex);
-        }
-    }
-
-    public static void refreshChunkLighting(LevelChunk chunk, ServerLevel level) {
         var lightEngine = level.getChunkSource().getLightEngine();
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
-        int worldBaseX = chunk.getPos().getMinBlockX();
-        int worldBaseZ = chunk.getPos().getMinBlockZ();
 
-        for (int x = 0; x < 16; x++) {
-            int worldX = worldBaseX + x;
-            for (int z = 0; z < 16; z++) {
-                int worldZ = worldBaseZ + z;
-                int surfaceY = chunk.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.WORLD_SURFACE, x, z);
-                int oceanY = chunk.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.OCEAN_FLOOR, x, z);
-
-                cursor.set(worldX, surfaceY, worldZ);
-                lightEngine.checkBlock(cursor);
-                if (oceanY != surfaceY) {
-                    cursor.set(worldX, oceanY, worldZ);
-                    lightEngine.checkBlock(cursor);
-                }
+        for (int depth = 0; depth < material.depth; depth++) {
+            int y = surfacePos.getY() - depth;
+            if (y < minBuildY) {
+                break;
             }
+
+            cursor.set(surfacePos.getX(), y, surfacePos.getZ());
+            BlockState state = level.getBlockState(cursor);
+            if (!isSurfaceReplaceable(state)) {
+                break;
+            }
+
+            int sectionIndex = chunk.getSectionIndex(y);
+            if (sectionIndex < 0 || sectionIndex >= chunk.getSectionsCount()) {
+                break;
+            }
+
+            LevelChunkSection section = chunk.getSection(sectionIndex);
+            section.acquire();
+            try {
+                int localX = cursor.getX() & 15;
+                int localY = y & 15;
+                int localZ = cursor.getZ() & 15;
+                BlockState current = section.getBlockState(localX, localY, localZ);
+                if (current.is(material.state.getBlock())) {
+                    continue;
+                }
+                section.setBlockState(localX, localY, localZ, material.state, false);
+            } finally {
+                section.release();
+            }
+
+            level.getChunkSource().blockChanged(cursor);
+            lightEngine.checkBlock(cursor);
+            changed++;
         }
+
+        return changed;
     }
 
-    private static void prioritizePlayerChunks(ServerLevel level, ChunkQueue queue, TerraformIndexData data, int waterLevel,
-                                               boolean grassifyEnabled, boolean grassVegEnabled, boolean flowerVegEnabled,
-                                               boolean saplingEnabled) {
+    private static boolean isSurfaceReplaceable(BlockState state) {
+        return state.is(Blocks.DIRT)
+            || state.is(Blocks.COARSE_DIRT)
+            || state.is(Blocks.GRASS_BLOCK)
+            || state.is(Blocks.STONE)
+            || state.is(Blocks.SAND)
+            || state.is(Blocks.GRAVEL)
+            || state.is(Blocks.CLAY);
+    }
+
+    private static void prioritizePlayerChunks(ServerLevel level, ChunkQueue queue, TerraformIndexData data, int seaLevel,
+                                               boolean noWaterWorldgen, boolean grassifyEnabled, boolean grassVegEnabled,
+                                               boolean flowerVegEnabled, boolean saplingEnabled) {
         int viewDistance = Math.max(0, level.getServer().getPlayerList().getViewDistance());
         for (ServerPlayer player : level.players()) {
             ChunkPos playerChunk = player.chunkPosition();
@@ -760,7 +564,7 @@ public final class TerraformSystem {
                         }
                         ChunkPos nearby = new ChunkPos(playerChunk.x + dx, playerChunk.z + dz);
                         long chunkKey = nearby.toLong();
-                        if (needsProcessing(data, chunkKey, waterLevel, grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
+                        if (needsProcessing(data, chunkKey, seaLevel, noWaterWorldgen, grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
                             queue.markLoaded(chunkKey);
                             if (!queue.hasTask(chunkKey)) {
                                 queue.ensureTask(chunkKey);
@@ -774,7 +578,7 @@ public final class TerraformSystem {
 
         for (long chunkKey : queue.loadedKeys()) {
             if (!queue.hasTask(chunkKey)
-                && needsProcessing(data, chunkKey, waterLevel, grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
+                && needsProcessing(data, chunkKey, seaLevel, noWaterWorldgen, grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
                 queue.ensureTask(chunkKey);
             }
         }
@@ -1552,22 +1356,6 @@ public final class TerraformSystem {
         }
     }
 
-    private static int packFloodIndex(int x, int y, int z) {
-        return (y << 8) | (z << 4) | x;
-    }
-
-    private static int unpackFloodX(int packed) {
-        return packed & 15;
-    }
-
-    private static int unpackFloodY(int packed) {
-        return packed >> 8;
-    }
-
-    private static int unpackFloodZ(int packed) {
-        return (packed >> 4) & 15;
-    }
-
     private static final class ChunkQueue {
         private final Long2ObjectMap<ChunkWork> tasks = new Long2ObjectOpenHashMap<>();
         private final ArrayDeque<Long> priorityOrder = new ArrayDeque<>();
@@ -1695,6 +1483,26 @@ public final class TerraformSystem {
             this.changed = changed;
             this.placed = placed;
             this.removed = removed;
+        }
+    }
+
+    private static final class SurfaceResult {
+        private final int surfaceChanged;
+        private final int waterRemoved;
+
+        private SurfaceResult(int surfaceChanged, int waterRemoved) {
+            this.surfaceChanged = surfaceChanged;
+            this.waterRemoved = waterRemoved;
+        }
+    }
+
+    private static final class SurfaceMaterial {
+        private final BlockState state;
+        private final int depth;
+
+        private SurfaceMaterial(BlockState state, int depth) {
+            this.state = state;
+            this.depth = depth;
         }
     }
 
