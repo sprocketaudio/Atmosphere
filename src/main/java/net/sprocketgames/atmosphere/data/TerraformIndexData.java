@@ -467,6 +467,16 @@ public class TerraformIndexData extends SavedData {
         setState(chunkKey, waterLevel, processedMask, enabledMask);
     }
 
+    public void clearChunkWaterProcessed(long chunkKey) {
+        long state = processedStates.get(chunkKey);
+        if (state == Long.MIN_VALUE) {
+            return;
+        }
+        int processedMask = extractProcessedMask(state);
+        int enabledMask = extractEnabledMask(state);
+        setState(chunkKey, Integer.MIN_VALUE, processedMask, enabledMask);
+    }
+
     public void clearChunkState(long chunkKey) {
         if (processedStates.remove(chunkKey) != Long.MIN_VALUE) {
             setDirty();

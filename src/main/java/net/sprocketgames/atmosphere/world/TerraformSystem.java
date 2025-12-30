@@ -283,7 +283,7 @@ public final class TerraformSystem {
 
             if (waterUpdated) {
                 cleanupSurfaceWater(chunk, level, waterLevel);
-                enqueueNeighborChunks(level, chunk.getPos());
+                enqueueNeighborChunks(level, data, chunk.getPos());
                 refreshChunkLighting(chunk, level);
             }
 
@@ -562,16 +562,17 @@ public final class TerraformSystem {
         }
     }
 
-    private static void enqueueNeighborChunks(ServerLevel level, ChunkPos pos) {
+    private static void enqueueNeighborChunks(ServerLevel level, TerraformIndexData data, ChunkPos pos) {
         int baseX = pos.x;
         int baseZ = pos.z;
-        enqueueIfLoaded(level, new ChunkPos(baseX + 1, baseZ));
-        enqueueIfLoaded(level, new ChunkPos(baseX - 1, baseZ));
-        enqueueIfLoaded(level, new ChunkPos(baseX, baseZ + 1));
-        enqueueIfLoaded(level, new ChunkPos(baseX, baseZ - 1));
+        enqueueNeighbor(level, data, new ChunkPos(baseX + 1, baseZ));
+        enqueueNeighbor(level, data, new ChunkPos(baseX - 1, baseZ));
+        enqueueNeighbor(level, data, new ChunkPos(baseX, baseZ + 1));
+        enqueueNeighbor(level, data, new ChunkPos(baseX, baseZ - 1));
     }
 
-    private static void enqueueIfLoaded(ServerLevel level, ChunkPos pos) {
+    private static void enqueueNeighbor(ServerLevel level, TerraformIndexData data, ChunkPos pos) {
+        data.clearChunkWaterProcessed(pos.toLong());
         LevelChunk chunk = level.getChunkSource().getChunkNow(pos.x, pos.z);
         if (chunk != null) {
             enqueue(level, pos);
