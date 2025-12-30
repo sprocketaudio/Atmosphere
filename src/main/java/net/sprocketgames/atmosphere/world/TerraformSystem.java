@@ -314,7 +314,7 @@ public final class TerraformSystem {
         if (waterNeeded && !waterLowering) {
             boolean allowWaterPlacement = previousWaterLevel == Integer.MIN_VALUE || waterLevel >= previousWaterLevel;
             removed = fastDrainChunk(chunk, waterLevel, level);
-            placed = allowWaterPlacement ? fastFillChunk(chunk, waterLevel, level) : 0;
+            placed = allowWaterPlacement ? fastFillChunk(chunk, waterLevel, level, data) : 0;
             processedWater = true;
             waterUpdated = removed > 0 || placed > 0;
             data.markChunkWaterProcessed(chunkKey, waterLevel);
@@ -464,7 +464,7 @@ public final class TerraformSystem {
         return removed;
     }
 
-    private static int fastFillChunk(LevelChunk chunk, int waterLevelY, ServerLevel level) {
+    private static int fastFillChunk(LevelChunk chunk, int waterLevelY, ServerLevel level, TerraformIndexData data) {
         int placed = 0;
         int minY = level.getMinBuildHeight();
         int maxY = Math.min(waterLevelY, level.getMaxBuildHeight() - 1);
@@ -509,20 +509,20 @@ public final class TerraformSystem {
             for (int x = 0; x < 16; x++) {
                 borderPos.set(worldBaseX + x, y, worldBaseZ);
                 neighborPos.set(worldBaseX + x, y, worldBaseZ - 1);
-                seedFromNeighborWater(level, borderPos, neighborPos, visited, queue, x, localY, 0);
+                seedFromNeighborWater(level, data, waterLevelY, borderPos, neighborPos, visited, queue, x, localY, 0);
 
                 borderPos.set(worldBaseX + x, y, worldBaseZ + 15);
                 neighborPos.set(worldBaseX + x, y, worldBaseZ + 16);
-                seedFromNeighborWater(level, borderPos, neighborPos, visited, queue, x, localY, 15);
+                seedFromNeighborWater(level, data, waterLevelY, borderPos, neighborPos, visited, queue, x, localY, 15);
             }
             for (int z = 0; z < 16; z++) {
                 borderPos.set(worldBaseX, y, worldBaseZ + z);
                 neighborPos.set(worldBaseX - 1, y, worldBaseZ + z);
-                seedFromNeighborWater(level, borderPos, neighborPos, visited, queue, 0, localY, z);
+                seedFromNeighborWater(level, data, waterLevelY, borderPos, neighborPos, visited, queue, 0, localY, z);
 
                 borderPos.set(worldBaseX + 15, y, worldBaseZ + z);
                 neighborPos.set(worldBaseX + 16, y, worldBaseZ + z);
-                seedFromNeighborWater(level, borderPos, neighborPos, visited, queue, 15, localY, z);
+                seedFromNeighborWater(level, data, waterLevelY, borderPos, neighborPos, visited, queue, 15, localY, z);
             }
         }
 
@@ -752,9 +752,15 @@ public final class TerraformSystem {
         }
     }
 
-    private static void seedFromNeighborWater(ServerLevel level, BlockPos borderPos, BlockPos neighborPos,
+    private static void seedFromNeighborWater(ServerLevel level, TerraformIndexData data, int waterLevelY,
+                                              BlockPos borderPos, BlockPos neighborPos,
                                               boolean[] visited, java.util.ArrayDeque<Integer> queue,
                                               int x, int localY, int z) {
+        ChunkPos neighborChunk = new ChunkPos(neighborPos);
+        if (!data.isChunkWaterProcessed(neighborChunk.toLong(), waterLevelY)) {
+            return;
+        }
+
         BlockState neighborState = level.getBlockState(neighborPos);
         if (!neighborState.is(Blocks.WATER)) {
             return;
@@ -786,9 +792,11 @@ public final class TerraformSystem {
                 int oceanY = chunk.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.OCEAN_FLOOR, x, z);
 
                 cursor.set(worldX, surfaceY, worldZ);
+                chunk.getSkyLightSources().update(chunk, x, surfaceY, z);
                 lightEngine.checkBlock(cursor);
                 if (oceanY != surfaceY) {
                     cursor.set(worldX, oceanY, worldZ);
+                    chunk.getSkyLightSources().update(chunk, x, oceanY, z);
                     lightEngine.checkBlock(cursor);
                 }
             }
