@@ -79,13 +79,13 @@ public final class TerraformSystem {
         queue.markLoaded(chunkKey);
         if (needsProcessing(data, chunkKey, seaLevel, noWaterWorldgen, terraformWaterEnabled, grassifyEnabled,
             grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
-            queue.ensureTask(chunkKey);
+            queue.ensureTaskBackground(chunkKey);
             if (needsPriorityProcessing(level, data, chunkKey, seaLevel, noWaterWorldgen, terraformWaterEnabled,
                 grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
                 queue.prioritize(chunkKey);
             }
         } else if (!queue.hasTask(chunkKey)) {
-            queue.ensureTask(chunkKey);
+            queue.ensureTaskBackground(chunkKey);
         }
 
     }
@@ -105,13 +105,13 @@ public final class TerraformSystem {
         queue.markLoaded(chunkKey);
         if (needsProcessing(data, chunkKey, seaLevel, noWaterWorldgen, terraformWaterEnabled, grassifyEnabled,
             grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
-            queue.ensureTask(chunkKey);
+            queue.ensureTaskNormal(chunkKey);
             if (needsPriorityProcessing(level, data, chunkKey, seaLevel, noWaterWorldgen, terraformWaterEnabled,
                 grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
                 queue.prioritize(chunkKey);
             }
         } else if (!queue.hasTask(chunkKey)) {
-            queue.ensureTask(chunkKey);
+            queue.ensureTaskNormal(chunkKey);
         }
     }
 
@@ -271,6 +271,7 @@ public final class TerraformSystem {
         while (processedChunks < maxChunksPerTick || (queue.hasPriority() && processedPriority < maxPriorityChunksPerTick)) {
             long chunkKey;
             boolean fromPriority;
+            String queueLabel = "normal";
             if (queue.hasPriority()) {
                 chunkKey = queue.popPriority();
                 fromPriority = needsPriorityProcessing(level, data, chunkKey, seaLevel, noWaterWorldgen, terraformWaterEnabled,
@@ -280,9 +281,15 @@ public final class TerraformSystem {
                     continue;
                 }
                 processedPriority++;
+                queueLabel = "priority";
             } else if (queue.hasNormal()) {
                 chunkKey = queue.popNormal();
                 fromPriority = false;
+                queueLabel = "normal";
+            } else if (queue.hasBackground()) {
+                chunkKey = queue.popBackground();
+                fromPriority = false;
+                queueLabel = "background";
             } else {
                 break;
             }
@@ -291,7 +298,7 @@ public final class TerraformSystem {
                 ChunkPos pos = new ChunkPos(chunkKey);
                 Atmosphere.LOGGER.info(
                     "Terraform queue {} chunk ({}, {})",
-                    fromPriority ? "priority" : "normal",
+                    queueLabel,
                     pos.x,
                     pos.z);
             }
@@ -1215,7 +1222,7 @@ public final class TerraformSystem {
                             grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
                             queue.markLoaded(chunkKey);
                             if (!queue.hasTask(chunkKey)) {
-                                queue.ensureTask(chunkKey);
+                                queue.ensureTaskNormal(chunkKey);
                             }
                             if (needsPriorityProcessing(level, data, chunkKey, seaLevel, noWaterWorldgen, terraformWaterEnabled,
                                 grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
@@ -1231,7 +1238,7 @@ public final class TerraformSystem {
             if (!queue.hasTask(chunkKey)
                 && needsProcessing(data, chunkKey, seaLevel, noWaterWorldgen, terraformWaterEnabled,
                     grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
-                queue.ensureTask(chunkKey);
+                queue.ensureTaskBackground(chunkKey);
             }
         }
     }
@@ -2012,21 +2019,30 @@ public final class TerraformSystem {
         private final Long2ObjectMap<ChunkWork> tasks = new Long2ObjectOpenHashMap<>();
         private final ArrayDeque<Long> priorityOrder = new ArrayDeque<>();
         private final ArrayDeque<Long> normalOrder = new ArrayDeque<>();
+        private final ArrayDeque<Long> backgroundOrder = new ArrayDeque<>();
         private final LongLinkedOpenHashSet loaded = new LongLinkedOpenHashSet();
 
         boolean isEmpty() {
-            return priorityOrder.isEmpty() && normalOrder.isEmpty();
+            return priorityOrder.isEmpty() && normalOrder.isEmpty() && backgroundOrder.isEmpty();
         }
 
         void markLoaded(long chunkKey) {
             loaded.add(chunkKey);
         }
 
-        void ensureTask(long chunkKey) {
+        void ensureTaskNormal(long chunkKey) {
             ChunkWork work = tasks.get(chunkKey);
             if (work == null) {
-                tasks.put(chunkKey, new ChunkWork(ChunkPos.getX(chunkKey), ChunkPos.getZ(chunkKey)));
+                tasks.put(chunkKey, new ChunkWork(ChunkPos.getX(chunkKey), ChunkPos.getZ(chunkKey), false));
                 normalOrder.add(chunkKey);
+            }
+        }
+
+        void ensureTaskBackground(long chunkKey) {
+            ChunkWork work = tasks.get(chunkKey);
+            if (work == null) {
+                tasks.put(chunkKey, new ChunkWork(ChunkPos.getX(chunkKey), ChunkPos.getZ(chunkKey), true));
+                backgroundOrder.add(chunkKey);
             }
         }
 
@@ -2035,20 +2051,23 @@ public final class TerraformSystem {
             loaded.remove(chunkKey);
             priorityOrder.remove(chunkKey);
             normalOrder.remove(chunkKey);
+            backgroundOrder.remove(chunkKey);
         }
 
         void finish(long chunkKey) {
             tasks.remove(chunkKey);
             priorityOrder.remove(chunkKey);
             normalOrder.remove(chunkKey);
+            backgroundOrder.remove(chunkKey);
         }
 
         void requeueLoaded() {
             tasks.clear();
             priorityOrder.clear();
             normalOrder.clear();
+            backgroundOrder.clear();
             for (long chunkKey : loaded) {
-                ensureTask(chunkKey);
+                ensureTaskBackground(chunkKey);
             }
         }
 
@@ -2062,17 +2081,26 @@ public final class TerraformSystem {
             return value == null ? 0L : value;
         }
 
+        long popBackground() {
+            Long value = backgroundOrder.poll();
+            return value == null ? 0L : value;
+        }
+
         ChunkWork peek(long chunkKey) {
             return tasks.get(chunkKey);
         }
 
         void prioritize(long chunkKey) {
-            if (tasks.containsKey(chunkKey)) {
+            ChunkWork work = tasks.get(chunkKey);
+            if (work != null) {
+                work.background = false;
                 if (priorityOrder.remove(chunkKey)) {
                     priorityOrder.addFirst(chunkKey);
                     return;
                 }
                 if (normalOrder.remove(chunkKey)) {
+                    priorityOrder.addFirst(chunkKey);
+                } else if (backgroundOrder.remove(chunkKey)) {
                     priorityOrder.addFirst(chunkKey);
                 } else {
                     priorityOrder.addFirst(chunkKey);
@@ -2081,7 +2109,8 @@ public final class TerraformSystem {
         }
 
         void requeue(long chunkKey, boolean priority) {
-            if (!tasks.containsKey(chunkKey)) {
+            ChunkWork work = tasks.get(chunkKey);
+            if (work == null) {
                 return;
             }
             if (priority) {
@@ -2089,7 +2118,12 @@ public final class TerraformSystem {
                 priorityOrder.addLast(chunkKey);
             } else {
                 normalOrder.remove(chunkKey);
-                normalOrder.addLast(chunkKey);
+                backgroundOrder.remove(chunkKey);
+                if (work.background) {
+                    backgroundOrder.addLast(chunkKey);
+                } else {
+                    normalOrder.addLast(chunkKey);
+                }
             }
         }
 
@@ -2099,6 +2133,10 @@ public final class TerraformSystem {
 
         boolean hasNormal() {
             return !normalOrder.isEmpty();
+        }
+
+        boolean hasBackground() {
+            return !backgroundOrder.isEmpty();
         }
 
         boolean isLoaded(long chunkKey) {
@@ -2212,9 +2250,11 @@ public final class TerraformSystem {
 
     private static final class ChunkWork {
         final ChunkPos pos;
+        boolean background;
 
-        ChunkWork(int chunkX, int chunkZ) {
+        ChunkWork(int chunkX, int chunkZ, boolean background) {
             this.pos = new ChunkPos(chunkX, chunkZ);
+            this.background = background;
         }
     }
 }
