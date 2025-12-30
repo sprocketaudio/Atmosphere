@@ -273,7 +273,12 @@ public final class TerraformSystem {
             boolean fromPriority;
             if (queue.hasPriority()) {
                 chunkKey = queue.popPriority();
-                fromPriority = true;
+                fromPriority = needsPriorityProcessing(level, data, chunkKey, seaLevel, noWaterWorldgen, terraformWaterEnabled,
+                    grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled);
+                if (!fromPriority) {
+                    queue.requeue(chunkKey, false);
+                    continue;
+                }
                 processedPriority++;
             } else if (queue.hasNormal()) {
                 chunkKey = queue.popNormal();
