@@ -603,6 +603,41 @@ public final class TerraformSystem {
             }
         }
 
+        int minSection = chunk.getMinSection();
+        int maxSection = chunk.getMaxSection();
+        for (int sectionY = minSection; sectionY < maxSection; sectionY++) {
+            LevelChunkSection section = chunk.getSection(chunk.getSectionIndexFromSectionY(sectionY));
+            if (!section.maybeHas(state -> state.getFluidState().is(FluidTags.WATER))) {
+                continue;
+            }
+
+            int sectionMinY = SectionPos.sectionToBlockCoord(sectionY);
+            section.acquire();
+            try {
+                for (int y = 0; y < 16; y++) {
+                    int worldY = sectionMinY + y;
+                    if (worldY < minY || worldY > maxY) {
+                        continue;
+                    }
+                    for (int x = 0; x < 16; x++) {
+                        for (int z = 0; z < 16; z++) {
+                            BlockState state = section.getBlockState(x, y, z);
+                            if (!state.getFluidState().is(FluidTags.WATER)) {
+                                continue;
+                            }
+                            int seedIndex = packFloodIndex(x, worldY - minY, z);
+                            if (!visited[seedIndex]) {
+                                visited[seedIndex] = true;
+                                queue.add(seedIndex);
+                            }
+                        }
+                    }
+                }
+            } finally {
+                section.release();
+            }
+        }
+
         BlockPos.MutableBlockPos borderPos = new BlockPos.MutableBlockPos();
         BlockPos.MutableBlockPos neighborPos = new BlockPos.MutableBlockPos();
         for (int y = minY; y <= maxY; y++) {
