@@ -33,6 +33,7 @@ import net.neoforged.neoforge.event.tick.LevelTickEvent;
 import net.sprocketgames.atmosphere.Atmosphere;
 import net.sprocketgames.atmosphere.config.AtmosphereConfig;
 import net.sprocketgames.atmosphere.data.TerraformIndexData;
+import net.sprocketgames.atmosphere.worldgen.NoWaterChunkGenerator;
 
 /**
  * Handles throttled terrain updates (no-water surface pass, surface grass, and vegetation) on a chunk-by-chunk basis.
@@ -67,7 +68,7 @@ public final class TerraformSystem {
         ChunkQueue queue = queueFor(level);
         TerraformIndexData data = TerraformIndexData.get(level);
         int seaLevel = data.getWaterLevelY();
-        boolean noWaterWorldgen = AtmosphereConfig.NO_WATER_WORLDGEN.get();
+        boolean noWaterWorldgen = isNoWaterWorldgen(level);
         boolean terraformWaterEnabled = noWaterWorldgen && seaLevel > level.getMinBuildHeight();
         boolean grassifyEnabled = data.isGrassifyEnabled();
         boolean grassVegEnabled = data.isGrassVegetationEnabled();
@@ -93,7 +94,7 @@ public final class TerraformSystem {
         ChunkQueue queue = queueFor(level);
         TerraformIndexData data = TerraformIndexData.get(level);
         int seaLevel = data.getWaterLevelY();
-        boolean noWaterWorldgen = AtmosphereConfig.NO_WATER_WORLDGEN.get();
+        boolean noWaterWorldgen = isNoWaterWorldgen(level);
         boolean terraformWaterEnabled = noWaterWorldgen && seaLevel > level.getMinBuildHeight();
         boolean grassifyEnabled = data.isGrassifyEnabled();
         boolean grassVegEnabled = data.isGrassVegetationEnabled();
@@ -122,7 +123,7 @@ public final class TerraformSystem {
     public static void processChunkNow(ServerLevel level, LevelChunk chunk) {
         TerraformIndexData data = TerraformIndexData.get(level);
         int seaLevel = data.getWaterLevelY();
-        boolean noWaterWorldgen = AtmosphereConfig.NO_WATER_WORLDGEN.get();
+        boolean noWaterWorldgen = isNoWaterWorldgen(level);
         boolean terraformWaterEnabled = noWaterWorldgen && seaLevel > level.getMinBuildHeight();
         boolean grassifyEnabled = data.isGrassifyEnabled();
         boolean grassVegEnabled = data.isGrassVegetationEnabled();
@@ -132,27 +133,6 @@ public final class TerraformSystem {
 
         processChunk(level, data, chunk, chunkKey, seaLevel, noWaterWorldgen, terraformWaterEnabled,
             grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled);
-    }
-
-    public static void applyNoWaterWorldgen(ServerLevel level, LevelChunk chunk) {
-        if (!AtmosphereConfig.NO_WATER_WORLDGEN.get()) {
-            return;
-        }
-
-        TerraformIndexData data = TerraformIndexData.get(level);
-        int seaLevel = data.getWaterLevelY();
-        long chunkKey = chunk.getPos().toLong();
-        if (data.isChunkSurfaceProcessed(chunkKey, seaLevel)) {
-            return;
-        }
-
-        SurfaceResult result = applyNoWaterSurface(chunk, level, seaLevel);
-        data.markChunkSurfaceProcessed(chunkKey, seaLevel);
-        if (result.surfaceChanged > 0 || result.waterRemoved > 0) {
-            Heightmap.primeHeightmaps(chunk, EnumSet.of(Heightmap.Types.WORLD_SURFACE, Heightmap.Types.OCEAN_FLOOR));
-            refreshChunkLighting(chunk, level);
-            level.getChunkSource().chunkMap.waitForLightBeforeSending(chunk.getPos(), 0);
-        }
     }
 
     public static void unload(ServerLevel level, ChunkPos pos) {
@@ -220,6 +200,10 @@ public final class TerraformSystem {
         return QUEUES.computeIfAbsent(level.dimension(), key -> new ChunkQueue());
     }
 
+    private static boolean isNoWaterWorldgen(ServerLevel level) {
+        return level.getChunkSource().getGenerator() instanceof NoWaterChunkGenerator;
+    }
+
     private static boolean needsProcessing(TerraformIndexData data, long chunkKey, int seaLevel,
                                            boolean noWaterWorldgen, boolean terraformWaterEnabled,
                                            boolean grassifyEnabled,
@@ -265,7 +249,7 @@ public final class TerraformSystem {
         ChunkQueue queue = queueFor(level);
         TerraformIndexData data = TerraformIndexData.get(level);
         int seaLevel = data.getWaterLevelY();
-        boolean noWaterWorldgen = AtmosphereConfig.NO_WATER_WORLDGEN.get();
+        boolean noWaterWorldgen = isNoWaterWorldgen(level);
         boolean terraformWaterEnabled = noWaterWorldgen && seaLevel > level.getMinBuildHeight();
         boolean grassifyEnabled = data.isGrassifyEnabled();
         boolean grassVegEnabled = data.isGrassVegetationEnabled();
@@ -359,6 +343,9 @@ public final class TerraformSystem {
             surfaceResult = applyNoWaterSurface(chunk, level, seaLevel);
             processedSurface = true;
             data.markChunkSurfaceProcessed(chunkKey, seaLevel);
+            if (surfaceResult.surfaceChanged > 0 || surfaceResult.waterRemoved > 0) {
+                Heightmap.primeHeightmaps(chunk, EnumSet.of(Heightmap.Types.WORLD_SURFACE, Heightmap.Types.OCEAN_FLOOR));
+            }
         }
 
         if (saplingNeeded && !saplingEnabled) {
@@ -623,6 +610,7 @@ public final class TerraformSystem {
 
         if (placed > 0 || removed > 0) {
             chunk.setUnsaved(true);
+            Heightmap.primeHeightmaps(chunk, EnumSet.of(Heightmap.Types.WORLD_SURFACE, Heightmap.Types.OCEAN_FLOOR));
         }
         state.surfaceWaterDone = true;
         return new WaterResult(placed, removed, false);
