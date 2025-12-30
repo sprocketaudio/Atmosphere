@@ -79,8 +79,8 @@ public final class TerraformSystem {
         if (needsProcessing(data, chunkKey, seaLevel, noWaterWorldgen, terraformWaterEnabled, grassifyEnabled,
             grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
             queue.ensureTask(chunkKey);
-            if (needsNonWaterProcessing(data, chunkKey, seaLevel, noWaterWorldgen, grassifyEnabled,
-                grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
+            if (needsPriorityProcessing(level, data, chunkKey, seaLevel, noWaterWorldgen, terraformWaterEnabled,
+                grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
                 queue.prioritize(chunkKey);
             }
         } else if (!queue.hasTask(chunkKey)) {
@@ -105,8 +105,8 @@ public final class TerraformSystem {
         if (needsProcessing(data, chunkKey, seaLevel, noWaterWorldgen, terraformWaterEnabled, grassifyEnabled,
             grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
             queue.ensureTask(chunkKey);
-            if (needsNonWaterProcessing(data, chunkKey, seaLevel, noWaterWorldgen, grassifyEnabled,
-                grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
+            if (needsPriorityProcessing(level, data, chunkKey, seaLevel, noWaterWorldgen, terraformWaterEnabled,
+                grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
                 queue.prioritize(chunkKey);
             }
         } else if (!queue.hasTask(chunkKey)) {
@@ -232,6 +232,16 @@ public final class TerraformSystem {
             || !data.isChunkSaplingProcessed(chunkKey, saplingEnabled);
     }
 
+    private static boolean needsPriorityProcessing(ServerLevel level, TerraformIndexData data, long chunkKey, int seaLevel,
+                                                   boolean noWaterWorldgen, boolean terraformWaterEnabled,
+                                                   boolean grassifyEnabled,
+                                                   boolean grassVegEnabled, boolean flowerVegEnabled,
+                                                   boolean saplingEnabled) {
+        return needsNonWaterProcessing(data, chunkKey, seaLevel, noWaterWorldgen, grassifyEnabled,
+            grassVegEnabled, flowerVegEnabled, saplingEnabled)
+            || needsSurfaceWaterProcessing(level, data, chunkKey, seaLevel, terraformWaterEnabled);
+    }
+
     private static boolean needsNonWaterProcessing(TerraformIndexData data, long chunkKey, int seaLevel,
                                                    boolean noWaterWorldgen, boolean grassifyEnabled,
                                                    boolean grassVegEnabled, boolean flowerVegEnabled,
@@ -240,6 +250,15 @@ public final class TerraformSystem {
             || !data.isChunkGrassProcessed(chunkKey, grassifyEnabled)
             || !data.isChunkVegetationProcessed(chunkKey, grassVegEnabled, flowerVegEnabled)
             || !data.isChunkSaplingProcessed(chunkKey, saplingEnabled);
+    }
+
+    private static boolean needsSurfaceWaterProcessing(ServerLevel level, TerraformIndexData data, long chunkKey, int seaLevel,
+                                                       boolean terraformWaterEnabled) {
+        if (!terraformWaterEnabled || data.isChunkWaterProcessed(chunkKey, seaLevel)) {
+            return false;
+        }
+        WaterFillState state = getWaterFillState(level, chunkKey);
+        return state == null || state.waterLevel != seaLevel || !state.surfaceWaterDone;
     }
 
     private static void processQueue(ServerLevel level) {
@@ -296,13 +315,16 @@ public final class TerraformSystem {
                 continue;
             }
 
-            boolean completed = processChunk(level, data, chunk, chunkKey, seaLevel, noWaterWorldgen, terraformWaterEnabled,
+        boolean completed = processChunk(level, data, chunk, chunkKey, seaLevel, noWaterWorldgen, terraformWaterEnabled,
+            grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled);
+        if (completed) {
+            queue.finish(chunkKey);
+        } else {
+            boolean keepPriority = fromPriority
+                && needsPriorityProcessing(level, data, chunkKey, seaLevel, noWaterWorldgen, terraformWaterEnabled,
                 grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled);
-            if (completed) {
-                queue.finish(chunkKey);
-            } else {
-                queue.requeue(chunkKey, fromPriority);
-            }
+            queue.requeue(chunkKey, keepPriority);
+        }
             processedChunks++;
         }
     }
@@ -386,13 +408,25 @@ public final class TerraformSystem {
 
         boolean surfaceWorkDone = processedSurface || processedGrass || processedVegetation || processedSaplings;
         if (waterNeeded && !surfaceWorkDone) {
-            waterResult = applyTerraformWater(chunk, level, seaLevel);
-            processedWater = true;
-            waterComplete = waterResult.complete;
-            if (waterComplete) {
-                data.markChunkWaterProcessed(chunkKey, seaLevel);
+            WaterFillState state = getOrCreateWaterFillState(level, chunk, seaLevel);
+            if (!state.surfaceWaterDone) {
+                waterResult = applySurfaceWater(chunk, level, seaLevel, state);
+                processedWater = true;
+                waterComplete = false;
+            } else {
+                waterResult = applyTerraformWater(chunk, level, seaLevel);
+                processedWater = true;
+                waterComplete = waterResult.complete;
+                if (waterComplete) {
+                    data.markChunkWaterProcessed(chunkKey, seaLevel);
+                }
             }
         } else if (waterNeeded) {
+            WaterFillState state = getOrCreateWaterFillState(level, chunk, seaLevel);
+            if (!state.surfaceWaterDone) {
+                waterResult = applySurfaceWater(chunk, level, seaLevel, state);
+                processedWater = true;
+            }
             waterComplete = false;
         }
 
@@ -535,6 +569,63 @@ public final class TerraformSystem {
             clearWaterFillState(level, chunk.getPos().toLong());
         }
         return new WaterResult(placed, removed, complete);
+    }
+
+    private static WaterResult applySurfaceWater(LevelChunk chunk, ServerLevel level, int waterLevel, WaterFillState state) {
+        int removed = 0;
+        int placed = 0;
+        if (!state.removedDone) {
+            removed = removeWaterAboveLevel(chunk, level, waterLevel);
+            state.removedDone = true;
+        }
+
+        int worldBaseX = chunk.getPos().getMinBlockX();
+        int worldBaseZ = chunk.getPos().getMinBlockZ();
+        int minY = state.minY;
+        var lightEngine = level.getChunkSource().getLightEngine();
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+
+        for (int x = 0; x < 16; x++) {
+            int worldX = worldBaseX + x;
+            for (int z = 0; z < 16; z++) {
+                int worldZ = worldBaseZ + z;
+                int surfaceY = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, x, z);
+                if (surfaceY > waterLevel) {
+                    continue;
+                }
+                int startY = Math.max(surfaceY + 1, minY);
+                for (int y = startY; y <= waterLevel; y++) {
+                    BlockState current = getChunkBlockState(chunk, y, x, z);
+                    if (current == null || !isWaterFillReplaceable(current)) {
+                        break;
+                    }
+                    int sectionIndex = chunk.getSectionIndex(y);
+                    if (sectionIndex < 0 || sectionIndex >= chunk.getSectionsCount()) {
+                        break;
+                    }
+                    LevelChunkSection section = chunk.getSection(sectionIndex);
+                    section.acquire();
+                    try {
+                        section.setBlockState(x, y & 15, z, Blocks.WATER.defaultBlockState(), false);
+                    } finally {
+                        section.release();
+                    }
+                    cursor.set(worldX, y, worldZ);
+                    level.getChunkSource().blockChanged(cursor);
+                    lightEngine.checkBlock(cursor);
+                    if (touchesLava(level, cursor)) {
+                        level.scheduleTick(cursor, Fluids.WATER, 0);
+                    }
+                    placed++;
+                }
+            }
+        }
+
+        if (placed > 0 || removed > 0) {
+            chunk.setUnsaved(true);
+        }
+        state.surfaceWaterDone = true;
+        return new WaterResult(placed, removed, false);
     }
 
     private static int removeWaterAboveLevel(LevelChunk chunk, ServerLevel level, int waterLevel) {
@@ -726,6 +817,14 @@ public final class TerraformSystem {
 
     private static Long2ObjectMap<WaterFillState> waterFillStates(ServerLevel level) {
         return WATER_FILL_STATES.computeIfAbsent(level.dimension(), key -> new Long2ObjectOpenHashMap<>());
+    }
+
+    private static WaterFillState getWaterFillState(ServerLevel level, long chunkKey) {
+        Long2ObjectMap<WaterFillState> states = WATER_FILL_STATES.get(level.dimension());
+        if (states == null) {
+            return null;
+        }
+        return states.get(chunkKey);
     }
 
     private static void clearWaterFillState(ServerLevel level, long chunkKey) {
@@ -2083,6 +2182,7 @@ public final class TerraformSystem {
         private final boolean[] skyExposed;
         private final ArrayDeque<Integer> queue;
         private boolean removedDone;
+        private boolean surfaceWaterDone;
 
         private WaterFillState(int waterLevel, int minY, int maxY, int height) {
             this.waterLevel = waterLevel;
@@ -2093,6 +2193,7 @@ public final class TerraformSystem {
             this.skyExposed = new boolean[16 * 16];
             this.queue = new ArrayDeque<>();
             this.removedDone = false;
+            this.surfaceWaterDone = false;
         }
     }
 
