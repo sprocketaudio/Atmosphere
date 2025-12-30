@@ -569,15 +569,13 @@ public final class TerraformSystem {
 
         int height = maxY - minY + 1;
         boolean[] visited = new boolean[16 * 16 * height];
-        int[] caps = new int[visited.length];
-        boolean[] allowUp = new boolean[visited.length];
-        Arrays.fill(caps, -1);
         ArrayDeque<Integer> queue = new ArrayDeque<>();
         BlockState water = Blocks.WATER.defaultBlockState();
 
         int worldBaseX = chunk.getPos().getMinBlockX();
         int worldBaseZ = chunk.getPos().getMinBlockZ();
         int[] surfaceYs = new int[16 * 16];
+        boolean[] skyExposed = new boolean[16 * 16];
 
         for (int x = 0; x < 16; x++) {
             int worldX = worldBaseX + x;
@@ -585,7 +583,9 @@ public final class TerraformSystem {
                 int worldZ = worldBaseZ + z;
                 int surfaceY = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, x, z);
                 surfaceYs[(x << 4) | z] = surfaceY;
-                if (surfaceY > maxY) {
+                boolean hasSky = surfaceY <= maxY;
+                skyExposed[(x << 4) | z] = hasSky;
+                if (!hasSky) {
                     continue;
                 }
 
@@ -596,9 +596,7 @@ public final class TerraformSystem {
                 }
 
                 int seedIndex = packFloodIndex(x, maxY - minY, z);
-                if (waterLevel > caps[seedIndex]) {
-                    caps[seedIndex] = waterLevel;
-                    allowUp[seedIndex] = maxY >= surfaceY;
+                if (!visited[seedIndex]) {
                     visited[seedIndex] = true;
                     queue.add(seedIndex);
                 }
@@ -612,20 +610,20 @@ public final class TerraformSystem {
             for (int x = 0; x < 16; x++) {
                 borderPos.set(worldBaseX + x, y, worldBaseZ);
                 neighborPos.set(worldBaseX + x, y, worldBaseZ - 1);
-                seedFromNeighborWater(level, borderPos, neighborPos, caps, allowUp, queue, surfaceYs, x, localY, 0, y);
+                seedFromNeighborWater(level, borderPos, neighborPos, visited, queue, x, localY, 0);
 
                 borderPos.set(worldBaseX + x, y, worldBaseZ + 15);
                 neighborPos.set(worldBaseX + x, y, worldBaseZ + 16);
-                seedFromNeighborWater(level, borderPos, neighborPos, caps, allowUp, queue, surfaceYs, x, localY, 15, y);
+                seedFromNeighborWater(level, borderPos, neighborPos, visited, queue, x, localY, 15);
             }
             for (int z = 0; z < 16; z++) {
                 borderPos.set(worldBaseX, y, worldBaseZ + z);
                 neighborPos.set(worldBaseX - 1, y, worldBaseZ + z);
-                seedFromNeighborWater(level, borderPos, neighborPos, caps, allowUp, queue, surfaceYs, 0, localY, z, y);
+                seedFromNeighborWater(level, borderPos, neighborPos, visited, queue, 0, localY, z);
 
                 borderPos.set(worldBaseX + 15, y, worldBaseZ + z);
                 neighborPos.set(worldBaseX + 16, y, worldBaseZ + z);
-                seedFromNeighborWater(level, borderPos, neighborPos, caps, allowUp, queue, surfaceYs, 15, localY, z, y);
+                seedFromNeighborWater(level, borderPos, neighborPos, visited, queue, 15, localY, z);
             }
         }
 
@@ -635,8 +633,6 @@ public final class TerraformSystem {
             int z = unpackFloodZ(packed);
             int localY = unpackFloodY(packed);
             int worldY = minY + localY;
-            int cap = caps[packed];
-            boolean canMoveUp = allowUp[packed];
             BlockPos pos = new BlockPos(worldBaseX + x, worldY, worldBaseZ + z);
             BlockState state = level.getBlockState(pos);
 
@@ -668,28 +664,21 @@ public final class TerraformSystem {
                 }
 
                 int neighborWorldY = minY + ny;
-                if (neighborWorldY > cap) {
+                if (neighborWorldY > worldY && !skyExposed[(nx << 4) | nz]) {
                     continue;
                 }
-                if (!canMoveUp && neighborWorldY > worldY) {
+                if (neighborWorldY > maxY) {
                     continue;
                 }
 
                 int neighborIndex = packFloodIndex(nx, ny, nz);
-                int surfaceY = surfaceYs[(nx << 4) | nz];
-                boolean allowUpNext = neighborWorldY >= surfaceY;
-                if (cap < caps[neighborIndex]) {
-                    continue;
-                }
-                if (cap == caps[neighborIndex] && !(allowUpNext && !allowUp[neighborIndex])) {
+                if (visited[neighborIndex]) {
                     continue;
                 }
 
                 neighborPos.set(worldBaseX + nx, minY + ny, worldBaseZ + nz);
                 BlockState neighborState = level.getBlockState(neighborPos);
                 if (neighborState.isAir() || neighborState.is(Blocks.WATER)) {
-                    caps[neighborIndex] = cap;
-                    allowUp[neighborIndex] = allowUpNext || allowUp[neighborIndex];
                     visited[neighborIndex] = true;
                     queue.add(neighborIndex);
                 }
@@ -704,9 +693,8 @@ public final class TerraformSystem {
     }
 
     private static void seedFromNeighborWater(ServerLevel level, BlockPos borderPos, BlockPos neighborPos,
-                                              int[] caps, boolean[] allowUp, ArrayDeque<Integer> queue,
-                                              int[] surfaceYs,
-                                              int x, int localY, int z, int cap) {
+                                              boolean[] visited, ArrayDeque<Integer> queue,
+                                              int x, int localY, int z) {
         BlockState neighborState = level.getBlockState(neighborPos);
         if (!neighborState.is(Blocks.WATER)) {
             return;
@@ -718,10 +706,8 @@ public final class TerraformSystem {
         }
 
         int seedIndex = packFloodIndex(x, localY, z);
-        if (cap > caps[seedIndex]) {
-            caps[seedIndex] = cap;
-            int surfaceY = surfaceYs[(x << 4) | z];
-            allowUp[seedIndex] = cap >= surfaceY;
+        if (!visited[seedIndex]) {
+            visited[seedIndex] = true;
             queue.add(seedIndex);
         }
     }
