@@ -323,15 +323,6 @@ public final class TerraformSystem {
             data.markChunkSurfaceProcessed(chunkKey, seaLevel);
         }
 
-        if (waterNeeded) {
-            waterResult = applyTerraformWater(chunk, level, seaLevel);
-            processedWater = true;
-            waterComplete = waterResult.complete;
-            if (waterComplete) {
-                data.markChunkWaterProcessed(chunkKey, seaLevel);
-            }
-        }
-
         if (saplingNeeded && !saplingEnabled) {
             SaplingResult result = processSaplingsInChunk(chunk, level, false);
             saplingResult = result;
@@ -375,6 +366,15 @@ public final class TerraformSystem {
             saplingResult = result;
             processedSaplings = true;
             data.markChunkSaplingProcessed(chunkKey, true);
+        }
+
+        if (waterNeeded) {
+            waterResult = applyTerraformWater(chunk, level, seaLevel);
+            processedWater = true;
+            waterComplete = waterResult.complete;
+            if (waterComplete) {
+                data.markChunkWaterProcessed(chunkKey, seaLevel);
+            }
         }
 
         if (AtmosphereConfig.DEBUG_LOGGING.get()) {
