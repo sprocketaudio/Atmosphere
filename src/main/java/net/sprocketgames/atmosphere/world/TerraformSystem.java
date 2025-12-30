@@ -17,6 +17,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.BiomeTags;
 import net.minecraft.tags.FluidTags;
+import net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
@@ -25,6 +26,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.levelgen.Heightmap;
 import net.neoforged.neoforge.event.tick.LevelTickEvent;
 import net.sprocketgames.atmosphere.Atmosphere;
 import net.sprocketgames.atmosphere.config.AtmosphereConfig;
@@ -36,6 +38,7 @@ import net.sprocketgames.atmosphere.data.TerraformIndexData;
 public final class TerraformSystem {
     private static final int MAX_CHUNKS_PER_TICK = 4;
     private static final int MAX_PRIORITY_CHUNKS_PER_TICK = 8;
+    private static final int SURFACE_DRAIN_DEPTH = 3;
     private static final int[] OFFSETS_X = {1, -1, 0, 0, 0, 0};
     private static final int[] OFFSETS_Y = {0, 0, 1, -1, 0, 0};
     private static final int[] OFFSETS_Z = {0, 0, 0, 0, 1, -1};
@@ -557,6 +560,85 @@ public final class TerraformSystem {
         }
 
         return placed;
+    }
+
+    public static int drainSurfaceWater(LevelChunk chunk, ServerLevel level, int waterLevelY) {
+        int cleared = 0;
+        BlockState air = Blocks.AIR.defaultBlockState();
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        int worldBaseX = chunk.getPos().getMinBlockX();
+        int worldBaseZ = chunk.getPos().getMinBlockZ();
+        int minBuildY = level.getMinBuildHeight();
+        int[] surfaceYs = new int[16 * 16];
+        boolean[] changedColumns = new boolean[16 * 16];
+
+        for (int x = 0; x < 16; x++) {
+            for (int z = 0; z < 16; z++) {
+                int surfaceY = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, x, z);
+                surfaceYs[(x << 4) | z] = surfaceY;
+                int minY = Math.max(minBuildY, surfaceY - SURFACE_DRAIN_DEPTH);
+                for (int y = surfaceY; y > waterLevelY && y >= minY; y--) {
+                    int sectionIndex = chunk.getSectionIndex(y);
+                    if (sectionIndex < 0 || sectionIndex >= chunk.getSectionsCount()) {
+                        continue;
+                    }
+
+                    LevelChunkSection section = chunk.getSection(sectionIndex);
+                    int localY = y & 15;
+                    section.acquire();
+                    try {
+                        BlockState state = section.getBlockState(x, localY, z);
+                        if (state.hasProperty(BlockStateProperties.WATERLOGGED)
+                            && state.getValue(BlockStateProperties.WATERLOGGED)) {
+                            BlockState clearedState = state.setValue(BlockStateProperties.WATERLOGGED, false);
+                            section.setBlockState(x, localY, z, clearedState, false);
+                        } else if (state.getFluidState().is(FluidTags.WATER)) {
+                            section.setBlockState(x, localY, z, air, false);
+                        } else {
+                            continue;
+                        }
+                    } finally {
+                        section.release();
+                    }
+
+                    changedColumns[(x << 4) | z] = true;
+                    cleared++;
+                }
+            }
+        }
+
+        if (cleared > 0) {
+            chunk.setUnsaved(true);
+            var lightEngine = level.getChunkSource().getLightEngine();
+            for (int x = 0; x < 16; x++) {
+                int worldX = worldBaseX + x;
+                for (int z = 0; z < 16; z++) {
+                    int columnIndex = (x << 4) | z;
+                    if (!changedColumns[columnIndex]) {
+                        continue;
+                    }
+                    int surfaceY = surfaceYs[columnIndex];
+                    cursor.set(worldX, surfaceY, worldBaseZ + z);
+                    lightEngine.checkBlock(cursor);
+                    if (surfaceY != waterLevelY) {
+                        cursor.set(worldX, waterLevelY, worldBaseZ + z);
+                        lightEngine.checkBlock(cursor);
+                    }
+                }
+            }
+        }
+
+        return cleared;
+    }
+
+    public static void resendChunkToWatchers(LevelChunk chunk, ServerLevel level) {
+        ChunkPos pos = chunk.getPos();
+        level.getChunkSource().chunkMap.waitForLightBeforeSending(pos, 0);
+        for (ServerPlayer player : level.getChunkSource().chunkMap.getPlayers(pos, false)) {
+            player.connection.send(chunk.getAuxLightManager(pos).sendLightDataTo(
+                new ClientboundLevelChunkWithLightPacket(chunk, level.getLightEngine(), null, null)
+            ));
+        }
     }
 
     private static void cleanupSurfaceWater(LevelChunk chunk, ServerLevel level, int waterLevelY) {
