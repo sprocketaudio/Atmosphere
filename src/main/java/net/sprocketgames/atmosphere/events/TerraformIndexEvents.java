@@ -39,6 +39,7 @@ public class TerraformIndexEvents {
             TerraformSystem.replaceGrassWithDirt(levelChunk, serverLevel);
         }
 
+        TerraformIndexData.get(serverLevel).clearChunkState(levelChunk.getPos().toLong());
         TerraformSystem.refreshChunkLighting(levelChunk, serverLevel);
         TerraformSystem.enqueue(serverLevel, levelChunk.getPos());
     }

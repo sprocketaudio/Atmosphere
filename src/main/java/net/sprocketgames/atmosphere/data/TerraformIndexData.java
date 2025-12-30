@@ -467,6 +467,12 @@ public class TerraformIndexData extends SavedData {
         setState(chunkKey, waterLevel, processedMask, enabledMask);
     }
 
+    public void clearChunkState(long chunkKey) {
+        if (processedStates.remove(chunkKey) != Long.MIN_VALUE) {
+            setDirty();
+        }
+    }
+
     private void migrateLegacyProcessedStates() {
         if (processedStates.isEmpty()) {
             for (Long2IntMap.Entry entry : processedWaterLevels.long2IntEntrySet()) {
