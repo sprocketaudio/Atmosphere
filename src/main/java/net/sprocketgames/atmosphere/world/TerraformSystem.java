@@ -276,6 +276,7 @@ public final class TerraformSystem {
         boolean terraformChanged = false;
 
         if (!waterNeeded && !grassNeeded && !vegetationNeeded && !saplingNeeded) {
+            releaseChunkGate(level, chunk, true);
             return;
         }
 
@@ -810,6 +811,10 @@ public final class TerraformSystem {
                 gate.timedOut = true;
                 if (!gate.future.isDone()) {
                     gate.future.complete(null);
+                }
+                LevelChunk chunk = level.getChunkSource().getChunkNow(ChunkPos.getX(entry.getLongKey()), ChunkPos.getZ(entry.getLongKey()));
+                if (chunk != null) {
+                    resendChunkToWatchers(chunk, level);
                 }
             }
         }
