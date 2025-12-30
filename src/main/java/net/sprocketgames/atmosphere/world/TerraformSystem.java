@@ -35,7 +35,6 @@ import net.sprocketgames.atmosphere.data.TerraformIndexData;
  */
 public final class TerraformSystem {
     private static final int MAX_CHUNKS_PER_TICK = 4;
-    private static final int PLAYER_PRIORITY_RADIUS = 6;
     private static final int[] OFFSETS_X = {1, -1, 0, 0, 0, 0};
     private static final int[] OFFSETS_Y = {0, 0, 1, -1, 0, 0};
     private static final int[] OFFSETS_Z = {0, 0, 0, 0, 1, -1};
@@ -498,36 +497,22 @@ public final class TerraformSystem {
     public static void refreshChunkLighting(LevelChunk chunk, ServerLevel level) {
         var lightEngine = level.getChunkSource().getLightEngine();
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
-        int minSection = chunk.getMinSection();
-        int maxSection = chunk.getMaxSection();
         int worldBaseX = chunk.getPos().getMinBlockX();
         int worldBaseZ = chunk.getPos().getMinBlockZ();
 
-        for (int sectionY = minSection; sectionY < maxSection; sectionY++) {
-            LevelChunkSection section = chunk.getSection(chunk.getSectionIndexFromSectionY(sectionY));
-            if (section.hasOnlyAir()) {
-                continue;
-            }
+        for (int x = 0; x < 16; x++) {
+            int worldX = worldBaseX + x;
+            for (int z = 0; z < 16; z++) {
+                int worldZ = worldBaseZ + z;
+                int surfaceY = chunk.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.WORLD_SURFACE, x, z);
+                int oceanY = chunk.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.OCEAN_FLOOR, x, z);
 
-            int sectionMinY = SectionPos.sectionToBlockCoord(sectionY);
-            section.acquire();
-            try {
-                for (int y = 0; y < 16; y++) {
-                    int worldY = sectionMinY + y;
-                    for (int x = 0; x < 16; x++) {
-                        int worldX = worldBaseX + x;
-                        for (int z = 0; z < 16; z++) {
-                            BlockState state = section.getBlockState(x, y, z);
-                            if (state.isAir() && !state.getFluidState().is(FluidTags.WATER)) {
-                                continue;
-                            }
-                            cursor.set(worldX, worldY, worldBaseZ + z);
-                            lightEngine.checkBlock(cursor);
-                        }
-                    }
+                cursor.set(worldX, surfaceY, worldZ);
+                lightEngine.checkBlock(cursor);
+                if (oceanY != surfaceY) {
+                    cursor.set(worldX, oceanY, worldZ);
+                    lightEngine.checkBlock(cursor);
                 }
-            } finally {
-                section.release();
             }
         }
     }
@@ -535,18 +520,24 @@ public final class TerraformSystem {
     private static void prioritizePlayerChunks(ServerLevel level, ChunkQueue queue, TerraformIndexData data, int waterLevel,
                                                boolean grassifyEnabled, boolean grassVegEnabled, boolean flowerVegEnabled,
                                                boolean saplingEnabled) {
+        int viewDistance = Math.max(0, level.getServer().getPlayerList().getViewDistance());
         for (ServerPlayer player : level.players()) {
             ChunkPos playerChunk = player.chunkPosition();
-            for (int dx = -PLAYER_PRIORITY_RADIUS; dx <= PLAYER_PRIORITY_RADIUS; dx++) {
-                for (int dz = -PLAYER_PRIORITY_RADIUS; dz <= PLAYER_PRIORITY_RADIUS; dz++) {
-                    ChunkPos nearby = new ChunkPos(playerChunk.x + dx, playerChunk.z + dz);
-                    long chunkKey = nearby.toLong();
-                    if (needsProcessing(data, chunkKey, waterLevel, grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
-                        queue.markLoaded(chunkKey);
-                        if (!queue.hasTask(chunkKey)) {
-                            queue.ensureTask(chunkKey);
+            for (int radius = viewDistance; radius >= 0; radius--) {
+                for (int dx = -radius; dx <= radius; dx++) {
+                    for (int dz = -radius; dz <= radius; dz++) {
+                        if (Math.abs(dx) != radius && Math.abs(dz) != radius) {
+                            continue;
                         }
-                        queue.prioritize(chunkKey);
+                        ChunkPos nearby = new ChunkPos(playerChunk.x + dx, playerChunk.z + dz);
+                        long chunkKey = nearby.toLong();
+                        if (needsProcessing(data, chunkKey, waterLevel, grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
+                            queue.markLoaded(chunkKey);
+                            if (!queue.hasTask(chunkKey)) {
+                                queue.ensureTask(chunkKey);
+                            }
+                            queue.prioritize(chunkKey);
+                        }
                     }
                 }
             }
