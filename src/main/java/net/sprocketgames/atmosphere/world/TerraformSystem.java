@@ -129,9 +129,12 @@ public final class TerraformSystem {
             return;
         }
 
-        applyNoWaterSurface(chunk, level, seaLevel);
+        SurfaceResult result = applyNoWaterSurface(chunk, level, seaLevel);
         data.markChunkSurfaceProcessed(chunkKey, seaLevel);
-        level.getChunkSource().chunkMap.waitForLightBeforeSending(chunk.getPos(), 0);
+        if (result.surfaceChanged > 0 || result.waterRemoved > 0) {
+            refreshChunkLighting(chunk, level);
+            level.getChunkSource().chunkMap.waitForLightBeforeSending(chunk.getPos(), 0);
+        }
     }
 
     public static void unload(ServerLevel level, ChunkPos pos) {
@@ -565,6 +568,29 @@ public final class TerraformSystem {
             || state.is(Blocks.SAND)
             || state.is(Blocks.GRAVEL)
             || state.is(Blocks.CLAY);
+    }
+
+    private static void refreshChunkLighting(LevelChunk chunk, ServerLevel level) {
+        var lightEngine = level.getChunkSource().getLightEngine();
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        int worldBaseX = chunk.getPos().getMinBlockX();
+        int worldBaseZ = chunk.getPos().getMinBlockZ();
+
+        for (int x = 0; x < 16; x++) {
+            int worldX = worldBaseX + x;
+            for (int z = 0; z < 16; z++) {
+                int worldZ = worldBaseZ + z;
+                int surfaceY = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, x, z);
+                int oceanY = chunk.getHeight(Heightmap.Types.OCEAN_FLOOR, x, z);
+
+                cursor.set(worldX, surfaceY, worldZ);
+                lightEngine.checkBlock(cursor);
+                if (oceanY != surfaceY) {
+                    cursor.set(worldX, oceanY, worldZ);
+                    lightEngine.checkBlock(cursor);
+                }
+            }
+        }
     }
 
     private static void prioritizePlayerChunks(ServerLevel level, ChunkQueue queue, TerraformIndexData data, int seaLevel,
