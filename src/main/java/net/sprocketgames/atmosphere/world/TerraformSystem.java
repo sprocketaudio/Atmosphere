@@ -639,30 +639,9 @@ public final class TerraformSystem {
             }
         }
 
-        BlockPos.MutableBlockPos borderPos = new BlockPos.MutableBlockPos();
+        seedFromBoundaryWater(chunk, visited, queue, minY, maxY);
+
         BlockPos.MutableBlockPos neighborPos = new BlockPos.MutableBlockPos();
-        for (int y = minY; y <= maxY; y++) {
-            int localY = y - minY;
-            for (int x = 0; x < 16; x++) {
-                borderPos.set(worldBaseX + x, y, worldBaseZ);
-                neighborPos.set(worldBaseX + x, y, worldBaseZ - 1);
-                seedFromNeighborWater(level, borderPos, neighborPos, visited, queue, x, localY, 0);
-
-                borderPos.set(worldBaseX + x, y, worldBaseZ + 15);
-                neighborPos.set(worldBaseX + x, y, worldBaseZ + 16);
-                seedFromNeighborWater(level, borderPos, neighborPos, visited, queue, x, localY, 15);
-            }
-            for (int z = 0; z < 16; z++) {
-                borderPos.set(worldBaseX, y, worldBaseZ + z);
-                neighborPos.set(worldBaseX - 1, y, worldBaseZ + z);
-                seedFromNeighborWater(level, borderPos, neighborPos, visited, queue, 0, localY, z);
-
-                borderPos.set(worldBaseX + 15, y, worldBaseZ + z);
-                neighborPos.set(worldBaseX + 16, y, worldBaseZ + z);
-                seedFromNeighborWater(level, borderPos, neighborPos, visited, queue, 15, localY, z);
-            }
-        }
-
         while (!queue.isEmpty()) {
             int packed = queue.removeFirst();
             int x = unpackFloodX(packed);
@@ -729,23 +708,46 @@ public final class TerraformSystem {
         return placed;
     }
 
-    private static void seedFromNeighborWater(ServerLevel level, BlockPos borderPos, BlockPos neighborPos,
-                                              boolean[] visited, ArrayDeque<Integer> queue,
-                                              int x, int localY, int z) {
-        BlockState neighborState = level.getBlockState(neighborPos);
-        if (!neighborState.is(Blocks.WATER)) {
-            return;
-        }
+    private static void seedFromBoundaryWater(LevelChunk chunk, boolean[] visited, ArrayDeque<Integer> queue,
+                                              int minY, int maxY) {
+        int minSection = chunk.getMinSection();
+        int maxSection = chunk.getMaxSection();
 
-        BlockState currentState = level.getBlockState(borderPos);
-        if (!currentState.isAir() && !currentState.is(Blocks.WATER)) {
-            return;
+        for (int x = 0; x < 16; x++) {
+            seedFromBoundaryColumn(chunk, visited, queue, minY, maxY, x, 0, minSection, maxSection);
+            seedFromBoundaryColumn(chunk, visited, queue, minY, maxY, x, 15, minSection, maxSection);
         }
+        for (int z = 1; z < 15; z++) {
+            seedFromBoundaryColumn(chunk, visited, queue, minY, maxY, 0, z, minSection, maxSection);
+            seedFromBoundaryColumn(chunk, visited, queue, minY, maxY, 15, z, minSection, maxSection);
+        }
+    }
 
-        int seedIndex = packFloodIndex(x, localY, z);
-        if (!visited[seedIndex]) {
-            visited[seedIndex] = true;
-            queue.add(seedIndex);
+    private static void seedFromBoundaryColumn(LevelChunk chunk, boolean[] visited, ArrayDeque<Integer> queue,
+                                               int minY, int maxY, int x, int z,
+                                               int minSection, int maxSection) {
+        for (int sectionY = minSection; sectionY < maxSection; sectionY++) {
+            LevelChunkSection section = chunk.getSection(chunk.getSectionIndexFromSectionY(sectionY));
+            if (!section.maybeHas(state -> state.getFluidState().is(FluidTags.WATER))) {
+                continue;
+            }
+
+            int sectionMinY = SectionPos.sectionToBlockCoord(sectionY);
+            for (int y = 0; y < 16; y++) {
+                int worldY = sectionMinY + y;
+                if (worldY < minY || worldY > maxY) {
+                    continue;
+                }
+                BlockState state = section.getBlockState(x, y, z);
+                if (!state.getFluidState().is(FluidTags.WATER)) {
+                    continue;
+                }
+                int seedIndex = packFloodIndex(x, worldY - minY, z);
+                if (!visited[seedIndex]) {
+                    visited[seedIndex] = true;
+                    queue.add(seedIndex);
+                }
+            }
         }
     }
 
