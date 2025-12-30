@@ -169,15 +169,12 @@ public final class TerraformSystem {
         while (processedChunks < MAX_CHUNKS_PER_TICK) {
             long chunkKey;
             boolean fromPriority;
-            if (processedChunks == 0 && queue.hasPriority()) {
+            if (queue.hasPriority()) {
                 chunkKey = queue.popPriority();
                 fromPriority = true;
             } else if (queue.hasNormal()) {
                 chunkKey = queue.popNormal();
                 fromPriority = false;
-            } else if (queue.hasPriority()) {
-                chunkKey = queue.popPriority();
-                fromPriority = true;
             } else {
                 break;
             }
