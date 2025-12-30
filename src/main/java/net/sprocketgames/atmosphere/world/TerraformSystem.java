@@ -38,8 +38,6 @@ import net.sprocketgames.atmosphere.data.TerraformIndexData;
  * Handles throttled terrain updates (no-water surface pass, surface grass, and vegetation) on a chunk-by-chunk basis.
  */
 public final class TerraformSystem {
-    private static final int MAX_CHUNKS_PER_TICK = 4;
-    private static final int MAX_PRIORITY_CHUNKS_PER_TICK = 8;
     private static final int SURFACE_DEPTH = 3;
     private static final int BEACH_DEPTH = 2;
     private static final int OCEAN_FLOOR_DEPTH = 4;
@@ -249,7 +247,9 @@ public final class TerraformSystem {
         int processedChunks = 0;
         int processedPriority = 0;
 
-        while (processedChunks < MAX_CHUNKS_PER_TICK || (queue.hasPriority() && processedPriority < MAX_PRIORITY_CHUNKS_PER_TICK)) {
+        int maxChunksPerTick = AtmosphereConfig.TERRAFORM_CHUNKS_PER_TICK.get();
+        int maxPriorityChunksPerTick = AtmosphereConfig.TERRAFORM_PRIORITY_CHUNKS_PER_TICK.get();
+        while (processedChunks < maxChunksPerTick || (queue.hasPriority() && processedPriority < maxPriorityChunksPerTick)) {
             long chunkKey;
             boolean fromPriority;
             if (queue.hasPriority()) {
