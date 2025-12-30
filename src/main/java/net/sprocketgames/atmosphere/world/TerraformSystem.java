@@ -641,6 +641,7 @@ public final class TerraformSystem {
         }
 
         seedFromBoundaryWater(chunk, visited, queue, minY, maxY);
+        seedFromNeighborBoundaryWater(level, chunk, visited, queue, minY, maxY);
 
         BlockPos.MutableBlockPos neighborPos = new BlockPos.MutableBlockPos();
         while (!queue.isEmpty()) {
@@ -744,6 +745,77 @@ public final class TerraformSystem {
                     continue;
                 }
                 int seedIndex = packFloodIndex(x, worldY - minY, z);
+                if (!visited[seedIndex]) {
+                    visited[seedIndex] = true;
+                    queue.add(seedIndex);
+                }
+            }
+        }
+    }
+
+    private static void seedFromNeighborBoundaryWater(ServerLevel level, LevelChunk chunk, boolean[] visited,
+                                                      ArrayDeque<Integer> queue, int minY, int maxY) {
+        ChunkPos pos = chunk.getPos();
+        seedFromNeighborBoundary(level, chunk, visited, queue, minY, maxY, pos.x, pos.z - 1, true, false);
+        seedFromNeighborBoundary(level, chunk, visited, queue, minY, maxY, pos.x, pos.z + 1, true, true);
+        seedFromNeighborBoundary(level, chunk, visited, queue, minY, maxY, pos.x - 1, pos.z, false, false);
+        seedFromNeighborBoundary(level, chunk, visited, queue, minY, maxY, pos.x + 1, pos.z, false, true);
+    }
+
+    private static void seedFromNeighborBoundary(ServerLevel level, LevelChunk chunk, boolean[] visited,
+                                                 ArrayDeque<Integer> queue, int minY, int maxY,
+                                                 int neighborX, int neighborZ, boolean zEdge, boolean positiveEdge) {
+        LevelChunk neighbor = level.getChunkSource().getChunkNow(neighborX, neighborZ);
+        if (neighbor == null) {
+            return;
+        }
+
+        int minSection = neighbor.getMinSection();
+        int maxSection = neighbor.getMaxSection();
+        int localEdge = positiveEdge ? 15 : 0;
+        int minLocal = 0;
+        int maxLocal = 15;
+
+        for (int local = minLocal; local <= maxLocal; local++) {
+            int x = zEdge ? local : localEdge;
+            int z = zEdge ? localEdge : local;
+            seedFromNeighborColumn(neighbor, chunk, visited, queue, minY, maxY, x, z, minSection, maxSection);
+        }
+    }
+
+    private static void seedFromNeighborColumn(LevelChunk neighbor, LevelChunk chunk, boolean[] visited,
+                                               ArrayDeque<Integer> queue, int minY, int maxY,
+                                               int x, int z, int minSection, int maxSection) {
+        for (int sectionY = minSection; sectionY < maxSection; sectionY++) {
+            LevelChunkSection section = neighbor.getSection(neighbor.getSectionIndexFromSectionY(sectionY));
+            if (!section.maybeHas(state -> state.getFluidState().is(FluidTags.WATER))) {
+                continue;
+            }
+
+            int sectionMinY = SectionPos.sectionToBlockCoord(sectionY);
+            for (int y = 0; y < 16; y++) {
+                int worldY = sectionMinY + y;
+                if (worldY < minY || worldY > maxY) {
+                    continue;
+                }
+                BlockState neighborState = section.getBlockState(x, y, z);
+                if (!neighborState.getFluidState().is(FluidTags.WATER)) {
+                    continue;
+                }
+
+                int localX = x;
+                int localZ = z;
+                int sectionIndex = chunk.getSectionIndex(worldY);
+                if (sectionIndex < 0 || sectionIndex >= chunk.getSectionsCount()) {
+                    continue;
+                }
+                LevelChunkSection targetSection = chunk.getSection(sectionIndex);
+                BlockState currentState = targetSection.getBlockState(localX, worldY & 15, localZ);
+                if (!currentState.isAir() && !currentState.is(Blocks.WATER)) {
+                    continue;
+                }
+
+                int seedIndex = packFloodIndex(localX, worldY - minY, localZ);
                 if (!visited[seedIndex]) {
                     visited[seedIndex] = true;
                     queue.add(seedIndex);
