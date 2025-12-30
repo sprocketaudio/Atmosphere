@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
@@ -39,11 +40,13 @@ public final class TerraformSystem {
     private static final int MAX_CHUNKS_PER_TICK = 4;
     private static final int MAX_PRIORITY_CHUNKS_PER_TICK = 8;
     private static final int SURFACE_DRAIN_DEPTH = 3;
+    private static final long GATE_TIMEOUT_TICKS = 20L * 10L;
     private static final int[] OFFSETS_X = {1, -1, 0, 0, 0, 0};
     private static final int[] OFFSETS_Y = {0, 0, 1, -1, 0, 0};
     private static final int[] OFFSETS_Z = {0, 0, 0, 0, 1, -1};
 
     private static final Map<ResourceKey<Level>, ChunkQueue> QUEUES = new HashMap<>();
+    private static final Map<ResourceKey<Level>, Long2ObjectMap<ChunkGate>> GATED_CHUNKS = new HashMap<>();
 
     private TerraformSystem() {
     }
@@ -57,6 +60,7 @@ public final class TerraformSystem {
             return;
         }
 
+        tickGatedChunks(serverLevel);
         processQueue(serverLevel);
     }
 
@@ -119,11 +123,19 @@ public final class TerraformSystem {
     public static void unload(ServerLevel level, ChunkPos pos) {
         ChunkQueue queue = queueFor(level);
         queue.drop(pos.toLong());
+        clearChunkGate(level, pos);
     }
 
     public static void requeueLoaded(ServerLevel level) {
         ChunkQueue queue = queueFor(level);
         queue.requeueLoaded();
+        TerraformIndexData data = TerraformIndexData.get(level);
+        int waterLevel = data.getWaterLevelY();
+        boolean grassifyEnabled = data.isGrassifyEnabled();
+        boolean grassVegEnabled = data.isGrassVegetationEnabled();
+        boolean flowerVegEnabled = data.isFlowerVegetationEnabled();
+        boolean saplingEnabled = data.isSaplingEnabled();
+        prioritizePlayerChunks(level, queue, data, waterLevel, grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled);
     }
 
     public static void replaceGrassWithDirt(LevelChunk chunk, ServerLevel level) {
@@ -261,8 +273,10 @@ public final class TerraformSystem {
         VegetationResult vegetationResult = new VegetationResult(0, 0, 0);
         SaplingResult saplingResult = new SaplingResult(0, 0, 0);
         boolean waterUpdated = false;
+        boolean terraformChanged = false;
 
         if (!waterNeeded && !grassNeeded && !vegetationNeeded && !saplingNeeded) {
+            releaseChunkGate(level, chunk, true);
             return;
         }
 
@@ -300,7 +314,7 @@ public final class TerraformSystem {
         if (waterNeeded && !waterLowering) {
             boolean allowWaterPlacement = previousWaterLevel == Integer.MIN_VALUE || waterLevel >= previousWaterLevel;
             removed = fastDrainChunk(chunk, waterLevel, level);
-            placed = allowWaterPlacement ? fastFillChunk(chunk, waterLevel, level) : 0;
+            placed = allowWaterPlacement ? fastFillChunk(chunk, waterLevel, level, data) : 0;
             processedWater = true;
             waterUpdated = removed > 0 || placed > 0;
             data.markChunkWaterProcessed(chunkKey, waterLevel);
@@ -330,11 +344,18 @@ public final class TerraformSystem {
             data.markChunkSaplingProcessed(chunkKey, true);
         }
 
+        terraformChanged = waterUpdated || surfaceChanged > 0 || vegetationResult.changed > 0 || saplingResult.changed > 0;
+
         if (waterUpdated) {
             cleanupSurfaceWater(chunk, level, waterLevel);
             enqueueNeighborChunks(level, data, chunk.getPos());
+        }
+
+        if (terraformChanged) {
             refreshChunkLighting(chunk, level);
         }
+
+        releaseChunkGate(level, chunk, true);
 
         if (AtmosphereConfig.DEBUG_LOGGING.get()) {
             List<String> summaries = new ArrayList<>();
@@ -411,10 +432,10 @@ public final class TerraformSystem {
                             BlockState state = section.getBlockState(x, y, z);
                             if (state.hasProperty(BlockStateProperties.WATERLOGGED) && state.getValue(BlockStateProperties.WATERLOGGED)) {
                                 BlockState cleared = state.setValue(BlockStateProperties.WATERLOGGED, false);
-                                section.setBlockState(x, y, z, cleared, false);
                                 cursor.set(worldX, worldY, worldBaseZ + z);
+                                setSectionBlockState(level, chunk, section, x, worldY, z, cleared, cursor);
+                                updateHeightmaps(chunk, x, worldY, z, cleared);
                                 level.getChunkSource().blockChanged(cursor);
-                                level.getChunkSource().getLightEngine().checkBlock(cursor);
                                 removed++;
                                 continue;
                             }
@@ -423,10 +444,10 @@ public final class TerraformSystem {
                                 continue;
                             }
 
-                            section.setBlockState(x, y, z, air, false);
                             cursor.set(worldX, worldY, worldBaseZ + z);
+                            setSectionBlockState(level, chunk, section, x, worldY, z, air, cursor);
+                            updateHeightmaps(chunk, x, worldY, z, air);
                             level.getChunkSource().blockChanged(cursor);
-                            level.getChunkSource().getLightEngine().checkBlock(cursor);
                             removed++;
                         }
                     }
@@ -443,7 +464,7 @@ public final class TerraformSystem {
         return removed;
     }
 
-    private static int fastFillChunk(LevelChunk chunk, int waterLevelY, ServerLevel level) {
+    private static int fastFillChunk(LevelChunk chunk, int waterLevelY, ServerLevel level, TerraformIndexData data) {
         int placed = 0;
         int minY = level.getMinBuildHeight();
         int maxY = Math.min(waterLevelY, level.getMaxBuildHeight() - 1);
@@ -488,20 +509,20 @@ public final class TerraformSystem {
             for (int x = 0; x < 16; x++) {
                 borderPos.set(worldBaseX + x, y, worldBaseZ);
                 neighborPos.set(worldBaseX + x, y, worldBaseZ - 1);
-                seedFromNeighborWater(level, borderPos, neighborPos, visited, queue, x, localY, 0);
+                seedFromNeighborWater(level, data, waterLevelY, borderPos, neighborPos, visited, queue, x, localY, 0);
 
                 borderPos.set(worldBaseX + x, y, worldBaseZ + 15);
                 neighborPos.set(worldBaseX + x, y, worldBaseZ + 16);
-                seedFromNeighborWater(level, borderPos, neighborPos, visited, queue, x, localY, 15);
+                seedFromNeighborWater(level, data, waterLevelY, borderPos, neighborPos, visited, queue, x, localY, 15);
             }
             for (int z = 0; z < 16; z++) {
                 borderPos.set(worldBaseX, y, worldBaseZ + z);
                 neighborPos.set(worldBaseX - 1, y, worldBaseZ + z);
-                seedFromNeighborWater(level, borderPos, neighborPos, visited, queue, 0, localY, z);
+                seedFromNeighborWater(level, data, waterLevelY, borderPos, neighborPos, visited, queue, 0, localY, z);
 
                 borderPos.set(worldBaseX + 15, y, worldBaseZ + z);
                 neighborPos.set(worldBaseX + 16, y, worldBaseZ + z);
-                seedFromNeighborWater(level, borderPos, neighborPos, visited, queue, 15, localY, z);
+                seedFromNeighborWater(level, data, waterLevelY, borderPos, neighborPos, visited, queue, 15, localY, z);
             }
         }
 
@@ -520,12 +541,12 @@ public final class TerraformSystem {
                     LevelChunkSection section = chunk.getSection(sectionIndex);
                     section.acquire();
                     try {
-                        section.setBlockState(x, worldY & 15, z, water, false);
+                        setSectionBlockState(level, chunk, section, x, worldY, z, water, pos);
                     } finally {
                         section.release();
                     }
+                    updateHeightmaps(chunk, x, worldY, z, water);
                     level.getChunkSource().blockChanged(pos);
-                    level.getChunkSource().getLightEngine().checkBlock(pos);
                     placed++;
                 }
             } else if (!state.is(Blocks.WATER)) {
@@ -582,18 +603,23 @@ public final class TerraformSystem {
                     if (sectionIndex < 0 || sectionIndex >= chunk.getSectionsCount()) {
                         continue;
                     }
-
                     LevelChunkSection section = chunk.getSection(sectionIndex);
-                    int localY = y & 15;
                     section.acquire();
                     try {
+                        int localY = y & 15;
                         BlockState state = section.getBlockState(x, localY, z);
                         if (state.hasProperty(BlockStateProperties.WATERLOGGED)
                             && state.getValue(BlockStateProperties.WATERLOGGED)) {
                             BlockState clearedState = state.setValue(BlockStateProperties.WATERLOGGED, false);
-                            section.setBlockState(x, localY, z, clearedState, false);
+                            cursor.set(worldBaseX + x, y, worldBaseZ + z);
+                            setSectionBlockState(level, chunk, section, x, y, z, clearedState, cursor);
+                            updateHeightmaps(chunk, x, y, z, clearedState);
+                            level.getChunkSource().blockChanged(cursor);
                         } else if (state.getFluidState().is(FluidTags.WATER)) {
-                            section.setBlockState(x, localY, z, air, false);
+                            cursor.set(worldBaseX + x, y, worldBaseZ + z);
+                            setSectionBlockState(level, chunk, section, x, y, z, air, cursor);
+                            updateHeightmaps(chunk, x, y, z, air);
+                            level.getChunkSource().blockChanged(cursor);
                         } else {
                             continue;
                         }
@@ -661,18 +687,18 @@ public final class TerraformSystem {
                 for (int z = 0; z < 16; z++) {
                     BlockState state = section.getBlockState(x, localY, z);
                     if (state.getFluidState().is(FluidTags.WATER) && !state.getFluidState().isSource()) {
-                        section.setBlockState(x, localY, z, Blocks.AIR.defaultBlockState(), false);
                         cursor.set(worldX, waterLevelY, worldBaseZ + z);
+                        setSectionBlockState(level, chunk, section, x, waterLevelY, z, Blocks.AIR.defaultBlockState(), cursor);
+                        updateHeightmaps(chunk, x, waterLevelY, z, Blocks.AIR.defaultBlockState());
                         level.getChunkSource().blockChanged(cursor);
-                        level.getChunkSource().getLightEngine().checkBlock(cursor);
                         changed = true;
                     } else if (state.hasProperty(BlockStateProperties.WATERLOGGED)
                         && state.getValue(BlockStateProperties.WATERLOGGED)) {
                         BlockState cleared = state.setValue(BlockStateProperties.WATERLOGGED, false);
-                        section.setBlockState(x, localY, z, cleared, false);
                         cursor.set(worldX, waterLevelY, worldBaseZ + z);
+                        setSectionBlockState(level, chunk, section, x, waterLevelY, z, cleared, cursor);
+                        updateHeightmaps(chunk, x, waterLevelY, z, cleared);
                         level.getChunkSource().blockChanged(cursor);
-                        level.getChunkSource().getLightEngine().checkBlock(cursor);
                         changed = true;
                     }
                 }
@@ -703,9 +729,38 @@ public final class TerraformSystem {
         }
     }
 
-    private static void seedFromNeighborWater(ServerLevel level, BlockPos borderPos, BlockPos neighborPos,
+    private static void updateHeightmaps(LevelChunk chunk, int localX, int worldY, int localZ, BlockState state) {
+        chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.MOTION_BLOCKING).update(localX, worldY, localZ, state);
+        chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES).update(localX, worldY, localZ, state);
+        chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.OCEAN_FLOOR).update(localX, worldY, localZ, state);
+        chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE).update(localX, worldY, localZ, state);
+    }
+
+    private static void setSectionBlockState(ServerLevel level, LevelChunk chunk, LevelChunkSection section, int localX,
+                                             int worldY, int localZ, BlockState state, BlockPos pos) {
+        int localY = worldY & 15;
+        boolean wasEmpty = section.hasOnlyAir();
+        BlockState previous = section.getBlockState(localX, localY, localZ);
+        section.setBlockState(localX, localY, localZ, state, false);
+        boolean isEmpty = section.hasOnlyAir();
+        if (wasEmpty != isEmpty) {
+            level.getChunkSource().getLightEngine().updateSectionStatus(pos, isEmpty);
+        }
+        if (net.minecraft.world.level.lighting.LightEngine.hasDifferentLightProperties(chunk, pos, previous, state)) {
+            chunk.getSkyLightSources().update(chunk, localX, worldY, localZ);
+            level.getChunkSource().getLightEngine().checkBlock(pos);
+        }
+    }
+
+    private static void seedFromNeighborWater(ServerLevel level, TerraformIndexData data, int waterLevelY,
+                                              BlockPos borderPos, BlockPos neighborPos,
                                               boolean[] visited, java.util.ArrayDeque<Integer> queue,
                                               int x, int localY, int z) {
+        ChunkPos neighborChunk = new ChunkPos(neighborPos);
+        if (!data.isChunkWaterProcessed(neighborChunk.toLong(), waterLevelY)) {
+            return;
+        }
+
         BlockState neighborState = level.getBlockState(neighborPos);
         if (!neighborState.is(Blocks.WATER)) {
             return;
@@ -737,13 +792,92 @@ public final class TerraformSystem {
                 int oceanY = chunk.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.OCEAN_FLOOR, x, z);
 
                 cursor.set(worldX, surfaceY, worldZ);
+                chunk.getSkyLightSources().update(chunk, x, surfaceY, z);
                 lightEngine.checkBlock(cursor);
                 if (oceanY != surfaceY) {
                     cursor.set(worldX, oceanY, worldZ);
+                    chunk.getSkyLightSources().update(chunk, x, oceanY, z);
                     lightEngine.checkBlock(cursor);
                 }
             }
         }
+    }
+
+    public static void gateChunkSend(ServerLevel level, ChunkPos pos) {
+        ChunkQueue queue = queueFor(level);
+        queue.markLoaded(pos.toLong());
+        Long2ObjectMap<ChunkGate> gates = gatedChunksFor(level);
+        if (gates.containsKey(pos.toLong())) {
+            return;
+        }
+
+        var holder = level.getChunkSource().chunkMap.getVisibleChunkIfPresent(pos.toLong());
+        if (holder == null) {
+            return;
+        }
+
+        CompletableFuture<Void> gateFuture = new CompletableFuture<>();
+        holder.addSendDependency(gateFuture);
+        gates.put(pos.toLong(), new ChunkGate(gateFuture, level.getGameTime()));
+    }
+
+    private static void clearChunkGate(ServerLevel level, ChunkPos pos) {
+        Long2ObjectMap<ChunkGate> gates = gatedChunksFor(level);
+        ChunkGate gate = gates.remove(pos.toLong());
+        if (gate != null && !gate.future.isDone()) {
+            gate.future.complete(null);
+        }
+    }
+
+    private static void tickGatedChunks(ServerLevel level) {
+        Long2ObjectMap<ChunkGate> gates = gatedChunksFor(level);
+        if (gates.isEmpty()) {
+            return;
+        }
+
+        long now = level.getGameTime();
+        var iterator = gates.long2ObjectEntrySet().iterator();
+        while (iterator.hasNext()) {
+            Long2ObjectMap.Entry<ChunkGate> entry = iterator.next();
+            ChunkGate gate = entry.getValue();
+            if (now - gate.startTick < GATE_TIMEOUT_TICKS) {
+                continue;
+            }
+
+            Atmosphere.LOGGER.warn(
+                "Terraform gating exceeded {} ticks for chunk {} in {}. Releasing send gate early.",
+                GATE_TIMEOUT_TICKS,
+                new ChunkPos(entry.getLongKey()),
+                level.dimension().location());
+            if (!gate.future.isDone()) {
+                gate.future.complete(null);
+            }
+            LevelChunk chunk = level.getChunkSource().getChunkNow(ChunkPos.getX(entry.getLongKey()), ChunkPos.getZ(entry.getLongKey()));
+            if (chunk != null) {
+                resendChunkToWatchers(chunk, level);
+            }
+            iterator.remove();
+        }
+    }
+
+    private static void releaseChunkGate(ServerLevel level, LevelChunk chunk, boolean resend) {
+        Long2ObjectMap<ChunkGate> gates = gatedChunksFor(level);
+        ChunkGate gate = gates.remove(chunk.getPos().toLong());
+        if (gate == null) {
+            return;
+        }
+
+        if (!gate.future.isDone()) {
+            gate.future.complete(null);
+        }
+
+        if (resend) {
+            resendChunkToWatchers(chunk, level);
+        }
+    }
+
+    private static Long2ObjectMap<ChunkGate> gatedChunksFor(ServerLevel level) {
+        return GATED_CHUNKS.computeIfAbsent(level.dimension(), key -> new Long2ObjectOpenHashMap<>());
     }
 
     private static void prioritizePlayerChunks(ServerLevel level, ChunkQueue queue, TerraformIndexData data, int waterLevel,
@@ -1703,6 +1837,17 @@ public final class TerraformSystem {
 
         ChunkWork(int chunkX, int chunkZ) {
             this.pos = new ChunkPos(chunkX, chunkZ);
+        }
+    }
+
+    private static final class ChunkGate {
+        private final CompletableFuture<Void> future;
+        private final long startTick;
+        private boolean timedOut;
+
+        private ChunkGate(CompletableFuture<Void> future, long startTick) {
+            this.future = future;
+            this.startTick = startTick;
         }
     }
 }
