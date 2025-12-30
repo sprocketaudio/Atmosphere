@@ -41,6 +41,9 @@ public final class TerraformSystem {
     private static final int SURFACE_DEPTH = 3;
     private static final int BEACH_DEPTH = 2;
     private static final int OCEAN_FLOOR_DEPTH = 4;
+    private static final int[] OFFSETS_X = {1, -1, 0, 0, 0, 0};
+    private static final int[] OFFSETS_Y = {0, 0, 1, -1, 0, 0};
+    private static final int[] OFFSETS_Z = {0, 0, 0, 0, 1, -1};
 
     private static final Map<ResourceKey<Level>, ChunkQueue> QUEUES = new HashMap<>();
 
@@ -557,60 +560,89 @@ public final class TerraformSystem {
 
     private static int fillTerraformWater(LevelChunk chunk, ServerLevel level, int waterLevel) {
         int placed = 0;
-        int minBuildY = level.getMinBuildHeight();
-        int maxBuildY = level.getMaxBuildHeight() - 1;
-        if (waterLevel < minBuildY) {
+        int minY = level.getMinBuildHeight();
+        int maxY = Math.min(waterLevel, level.getMaxBuildHeight() - 1);
+        if (maxY < minY) {
             return 0;
         }
 
-        int clampedWaterLevel = Math.min(waterLevel, maxBuildY);
+        int height = maxY - minY + 1;
+        boolean[] visited = new boolean[16 * 16 * height];
+        ArrayDeque<Integer> queue = new ArrayDeque<>();
+        BlockState water = Blocks.WATER.defaultBlockState();
+
         int worldBaseX = chunk.getPos().getMinBlockX();
         int worldBaseZ = chunk.getPos().getMinBlockZ();
-        BlockState water = Blocks.WATER.defaultBlockState();
-        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
-        var lightEngine = level.getChunkSource().getLightEngine();
 
         for (int x = 0; x < 16; x++) {
             int worldX = worldBaseX + x;
             for (int z = 0; z < 16; z++) {
                 int worldZ = worldBaseZ + z;
-                int surfaceY = chunk.getHeight(Heightmap.Types.OCEAN_FLOOR, x, z);
-                if (surfaceY >= clampedWaterLevel) {
+                BlockPos seedPos = new BlockPos(worldX, maxY, worldZ);
+                if (!level.canSeeSky(seedPos)) {
                     continue;
                 }
 
-                Holder<Biome> biomeHolder = chunk.getNoiseBiome(x >> 2, surfaceY >> 2, z >> 2);
-                if (!biomeHolder.is(BiomeTags.IS_OCEAN)
-                    && !biomeHolder.is(BiomeTags.IS_DEEP_OCEAN)
-                    && !biomeHolder.is(BiomeTags.IS_RIVER)
-                    && !biomeHolder.is(BiomeTags.IS_BEACH)) {
+                BlockState seedState = level.getBlockState(seedPos);
+                if (!seedState.isAir() && !seedState.is(Blocks.WATER)) {
                     continue;
                 }
 
-                int startY = Math.max(surfaceY + 1, minBuildY);
-                for (int y = startY; y <= clampedWaterLevel; y++) {
-                    int sectionIndex = chunk.getSectionIndex(y);
-                    if (sectionIndex < 0 || sectionIndex >= chunk.getSectionsCount()) {
-                        continue;
-                    }
+                int seedIndex = packFloodIndex(x, maxY - minY, z);
+                if (!visited[seedIndex]) {
+                    visited[seedIndex] = true;
+                    queue.add(seedIndex);
+                }
+            }
+        }
+
+        BlockPos.MutableBlockPos neighborPos = new BlockPos.MutableBlockPos();
+        while (!queue.isEmpty()) {
+            int packed = queue.removeFirst();
+            int x = unpackFloodX(packed);
+            int z = unpackFloodZ(packed);
+            int localY = unpackFloodY(packed);
+            int worldY = minY + localY;
+            BlockPos pos = new BlockPos(worldBaseX + x, worldY, worldBaseZ + z);
+            BlockState state = level.getBlockState(pos);
+
+            if (state.isAir()) {
+                int sectionIndex = chunk.getSectionIndex(worldY);
+                if (sectionIndex >= 0 && sectionIndex < chunk.getSectionsCount()) {
                     LevelChunkSection section = chunk.getSection(sectionIndex);
                     section.acquire();
                     try {
-                        int localX = worldX & 15;
-                        int localY = y & 15;
-                        int localZ = worldZ & 15;
-                        BlockState current = section.getBlockState(localX, localY, localZ);
-                        if (!current.isAir()) {
-                            continue;
-                        }
-                        section.setBlockState(localX, localY, localZ, water, false);
+                        section.setBlockState(x, worldY & 15, z, water, false);
                     } finally {
                         section.release();
                     }
-                    cursor.set(worldX, y, worldZ);
-                    level.getChunkSource().blockChanged(cursor);
-                    lightEngine.checkBlock(cursor);
+                    level.getChunkSource().blockChanged(pos);
+                    level.getChunkSource().getLightEngine().checkBlock(pos);
                     placed++;
+                }
+            } else if (!state.is(Blocks.WATER)) {
+                continue;
+            }
+
+            for (int i = 0; i < 6; i++) {
+                int nx = x + OFFSETS_X[i];
+                int ny = localY + OFFSETS_Y[i];
+                int nz = z + OFFSETS_Z[i];
+
+                if (nx < 0 || nx >= 16 || nz < 0 || nz >= 16 || ny < 0 || ny >= height) {
+                    continue;
+                }
+
+                int neighborIndex = packFloodIndex(nx, ny, nz);
+                if (visited[neighborIndex]) {
+                    continue;
+                }
+
+                neighborPos.set(worldBaseX + nx, minY + ny, worldBaseZ + nz);
+                BlockState neighborState = level.getBlockState(neighborPos);
+                if (neighborState.isAir() || neighborState.is(Blocks.WATER)) {
+                    visited[neighborIndex] = true;
+                    queue.add(neighborIndex);
                 }
             }
         }
@@ -1734,6 +1766,22 @@ public final class TerraformSystem {
             this.placed = placed;
             this.removed = removed;
         }
+    }
+
+    private static int packFloodIndex(int x, int y, int z) {
+        return (y << 8) | (z << 4) | x;
+    }
+
+    private static int unpackFloodX(int packed) {
+        return packed & 15;
+    }
+
+    private static int unpackFloodY(int packed) {
+        return packed >> 8;
+    }
+
+    private static int unpackFloodZ(int packed) {
+        return (packed >> 4) & 15;
     }
 
     private static final class ChunkWork {
