@@ -368,13 +368,16 @@ public final class TerraformSystem {
             data.markChunkSaplingProcessed(chunkKey, true);
         }
 
-        if (waterNeeded) {
+        boolean surfaceWorkDone = processedSurface || processedGrass || processedVegetation || processedSaplings;
+        if (waterNeeded && !surfaceWorkDone) {
             waterResult = applyTerraformWater(chunk, level, seaLevel);
             processedWater = true;
             waterComplete = waterResult.complete;
             if (waterComplete) {
                 data.markChunkWaterProcessed(chunkKey, seaLevel);
             }
+        } else if (waterNeeded) {
+            waterComplete = false;
         }
 
         if (AtmosphereConfig.DEBUG_LOGGING.get()) {

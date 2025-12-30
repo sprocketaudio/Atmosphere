@@ -33,7 +33,7 @@ public final class AtmosphereConfig {
             .comment("Max priority chunks processed per tick by the terraform queue.")
             .defineInRange("terraformPriorityChunksPerTick", 8, 1, 256);
         TERRAFORM_WATER_BUDGET = builder
-            .comment("Max flood-fill nodes processed per chunk per tick when applying terraform water.")
+            .comment("Max flood-fill nodes (block positions visited) processed per chunk per tick when applying terraform water.")
             .defineInRange("terraformWaterBudget", 2000, 100, 200000);
         builder.pop();
 
