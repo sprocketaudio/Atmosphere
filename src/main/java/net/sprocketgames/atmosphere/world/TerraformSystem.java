@@ -437,6 +437,30 @@ public final class TerraformSystem {
             }
         }
 
+        BlockPos.MutableBlockPos borderPos = new BlockPos.MutableBlockPos();
+        BlockPos.MutableBlockPos neighborPos = new BlockPos.MutableBlockPos();
+        for (int y = minY; y <= maxY; y++) {
+            int localY = y - minY;
+            for (int x = 0; x < 16; x++) {
+                borderPos.set(worldBaseX + x, y, worldBaseZ);
+                neighborPos.set(worldBaseX + x, y, worldBaseZ - 1);
+                seedFromNeighborWater(level, borderPos, neighborPos, visited, queue, x, localY, 0);
+
+                borderPos.set(worldBaseX + x, y, worldBaseZ + 15);
+                neighborPos.set(worldBaseX + x, y, worldBaseZ + 16);
+                seedFromNeighborWater(level, borderPos, neighborPos, visited, queue, x, localY, 15);
+            }
+            for (int z = 0; z < 16; z++) {
+                borderPos.set(worldBaseX, y, worldBaseZ + z);
+                neighborPos.set(worldBaseX - 1, y, worldBaseZ + z);
+                seedFromNeighborWater(level, borderPos, neighborPos, visited, queue, 0, localY, z);
+
+                borderPos.set(worldBaseX + 15, y, worldBaseZ + z);
+                neighborPos.set(worldBaseX + 16, y, worldBaseZ + z);
+                seedFromNeighborWater(level, borderPos, neighborPos, visited, queue, 15, localY, z);
+            }
+        }
+
         while (!queue.isEmpty()) {
             int packed = queue.removeFirst();
             int x = unpackFloodX(packed);
@@ -478,7 +502,7 @@ public final class TerraformSystem {
                     continue;
                 }
 
-                BlockPos neighborPos = new BlockPos(worldBaseX + nx, minY + ny, worldBaseZ + nz);
+                neighborPos.set(worldBaseX + nx, minY + ny, worldBaseZ + nz);
                 BlockState neighborState = level.getBlockState(neighborPos);
                 if (neighborState.isAir() || neighborState.is(Blocks.WATER)) {
                     visited[neighborIndex] = true;
@@ -492,6 +516,26 @@ public final class TerraformSystem {
         }
 
         return placed;
+    }
+
+    private static void seedFromNeighborWater(ServerLevel level, BlockPos borderPos, BlockPos neighborPos,
+                                              boolean[] visited, java.util.ArrayDeque<Integer> queue,
+                                              int x, int localY, int z) {
+        BlockState neighborState = level.getBlockState(neighborPos);
+        if (!neighborState.is(Blocks.WATER)) {
+            return;
+        }
+
+        BlockState currentState = level.getBlockState(borderPos);
+        if (!currentState.isAir() && !currentState.is(Blocks.WATER)) {
+            return;
+        }
+
+        int seedIndex = packFloodIndex(x, localY, z);
+        if (!visited[seedIndex]) {
+            visited[seedIndex] = true;
+            queue.add(seedIndex);
+        }
     }
 
     public static void refreshChunkLighting(LevelChunk chunk, ServerLevel level) {
