@@ -117,7 +117,7 @@ public final class TerraformIndexController {
         if (ticks >= TICKS_PER_SECOND) {
             ticks = 0;
             long nextTerraformIndex = data.getTerraformIndex() + 1;
-            setTerraformIndex(level, nextTerraformIndex, false);
+            setTerraformIndex(level, nextTerraformIndex, true);
         }
         AUTO_TICK_COUNTERS.put(key, ticks);
     }
