@@ -282,6 +282,15 @@ public final class TerraformSystem {
                 break;
             }
 
+            if (AtmosphereConfig.DEBUG_LOGGING.get()) {
+                ChunkPos pos = new ChunkPos(chunkKey);
+                Atmosphere.LOGGER.info(
+                    "Terraform queue {} chunk ({}, {})",
+                    fromPriority ? "priority" : "normal",
+                    pos.x,
+                    pos.z);
+            }
+
             ChunkWork work = queue.peek(chunkKey);
             if (work == null) {
                 processedChunks++;
@@ -1208,8 +1217,8 @@ public final class TerraformSystem {
                             if (!queue.hasTask(chunkKey)) {
                                 queue.ensureTask(chunkKey);
                             }
-                            if (needsNonWaterProcessing(data, chunkKey, seaLevel, noWaterWorldgen, grassifyEnabled,
-                                grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
+                            if (needsPriorityProcessing(level, data, chunkKey, seaLevel, noWaterWorldgen, terraformWaterEnabled,
+                                grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
                                 queue.prioritize(chunkKey);
                             }
                         }
