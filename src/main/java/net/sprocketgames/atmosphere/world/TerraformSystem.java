@@ -27,6 +27,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.neoforged.neoforge.event.tick.LevelTickEvent;
 import net.sprocketgames.atmosphere.Atmosphere;
@@ -683,6 +684,7 @@ public final class TerraformSystem {
                     }
                     level.getChunkSource().blockChanged(pos);
                     level.getChunkSource().getLightEngine().checkBlock(pos);
+                    level.scheduleTick(pos, Fluids.WATER, 0);
                     placed++;
                 }
             } else if (!state.is(Blocks.WATER)) {
