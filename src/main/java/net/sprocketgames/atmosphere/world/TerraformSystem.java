@@ -25,6 +25,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.levelgen.Heightmap;
 import net.neoforged.neoforge.event.tick.LevelTickEvent;
 import net.sprocketgames.atmosphere.Atmosphere;
 import net.sprocketgames.atmosphere.config.AtmosphereConfig;
@@ -36,6 +37,8 @@ import net.sprocketgames.atmosphere.data.TerraformIndexData;
 public final class TerraformSystem {
     private static final int MAX_CHUNKS_PER_TICK = 4;
     private static final int MAX_PRIORITY_CHUNKS_PER_TICK = 8;
+    private static final int SURFACE_DRAIN_DEPTH = 3;
+    private static final int MAX_SURFACE_DRAIN_CLEARS = 256;
     private static final int[] OFFSETS_X = {1, -1, 0, 0, 0, 0};
     private static final int[] OFFSETS_Y = {0, 0, 1, -1, 0, 0};
     private static final int[] OFFSETS_Z = {0, 0, 0, 0, 1, -1};
@@ -557,6 +560,105 @@ public final class TerraformSystem {
         }
 
         return placed;
+    }
+
+    public static int drainSurfaceWater(LevelChunk chunk, ServerLevel level, int waterLevelY) {
+        int cleared = 0;
+        BlockState air = Blocks.AIR.defaultBlockState();
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        int worldBaseX = chunk.getPos().getMinBlockX();
+        int worldBaseZ = chunk.getPos().getMinBlockZ();
+        int minBuildY = level.getMinBuildHeight();
+        int maxBuildY = level.getMaxBuildHeight() - 1;
+        int[] surfaceYs = new int[16 * 16];
+
+        for (int x = 0; x < 16; x++) {
+            for (int z = 0; z < 16; z++) {
+                surfaceYs[(x << 4) | z] = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, x, z);
+            }
+        }
+
+        int minSurfaceY = Integer.MAX_VALUE;
+        int maxSurfaceY = Integer.MIN_VALUE;
+        for (int surfaceY : surfaceYs) {
+            minSurfaceY = Math.min(minSurfaceY, surfaceY);
+            maxSurfaceY = Math.max(maxSurfaceY, surfaceY);
+        }
+
+        int minY = Math.max(minBuildY, minSurfaceY - SURFACE_DRAIN_DEPTH);
+        int maxY = Math.min(maxBuildY, maxSurfaceY);
+        if (maxY <= waterLevelY || maxY < minY) {
+            return 0;
+        }
+
+        int minSection = chunk.getSectionIndex(minY);
+        int maxSection = chunk.getSectionIndex(maxY);
+
+        for (int sectionIndex = minSection; sectionIndex <= maxSection; sectionIndex++) {
+            if (sectionIndex < 0 || sectionIndex >= chunk.getSectionsCount()) {
+                continue;
+            }
+
+            LevelChunkSection section = chunk.getSection(sectionIndex);
+            if (!section.maybeHas(state -> state.getFluidState().is(FluidTags.WATER)
+                || (state.hasProperty(BlockStateProperties.WATERLOGGED)
+                && state.getValue(BlockStateProperties.WATERLOGGED)))) {
+                continue;
+            }
+
+            int sectionMinY = SectionPos.sectionToBlockCoord(chunk.getMinSection() + sectionIndex);
+            int sectionMaxY = sectionMinY + 15;
+            int localMinY = Math.max(0, minY - sectionMinY);
+            int localMaxY = Math.min(15, maxY - sectionMinY);
+
+            section.acquire();
+            try {
+                for (int localY = localMaxY; localY >= localMinY; localY--) {
+                    int worldY = sectionMinY + localY;
+                    if (worldY <= waterLevelY) {
+                        break;
+                    }
+                    for (int x = 0; x < 16; x++) {
+                        int worldX = worldBaseX + x;
+                        for (int z = 0; z < 16; z++) {
+                            int surfaceY = surfaceYs[(x << 4) | z];
+                            if (worldY > surfaceY || worldY < surfaceY - SURFACE_DRAIN_DEPTH) {
+                                continue;
+                            }
+
+                            BlockState state = section.getBlockState(x, localY, z);
+                            if (state.hasProperty(BlockStateProperties.WATERLOGGED)
+                                && state.getValue(BlockStateProperties.WATERLOGGED)) {
+                                BlockState clearedState = state.setValue(BlockStateProperties.WATERLOGGED, false);
+                                section.setBlockState(x, localY, z, clearedState, false);
+                            } else if (state.getFluidState().is(FluidTags.WATER)) {
+                                section.setBlockState(x, localY, z, air, false);
+                            } else {
+                                continue;
+                            }
+
+                            cursor.set(worldX, worldY, worldBaseZ + z);
+                            level.getChunkSource().blockChanged(cursor);
+                            level.getChunkSource().getLightEngine().checkBlock(cursor);
+                            cleared++;
+
+                            if (cleared >= MAX_SURFACE_DRAIN_CLEARS) {
+                                chunk.setUnsaved(true);
+                                return cleared;
+                            }
+                        }
+                    }
+                }
+            } finally {
+                section.release();
+            }
+        }
+
+        if (cleared > 0) {
+            chunk.setUnsaved(true);
+        }
+
+        return cleared;
     }
 
     private static void cleanupSurfaceWater(LevelChunk chunk, ServerLevel level, int waterLevelY) {
