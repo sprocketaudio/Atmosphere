@@ -40,6 +40,7 @@ public class TerraformIndexEvents {
         }
 
         TerraformIndexData.get(serverLevel).clearChunkState(levelChunk.getPos().toLong());
+        TerraformSystem.applyNoWaterWorldgen(serverLevel, levelChunk);
 
         if (shouldProcessImmediately(serverLevel, levelChunk)) {
             TerraformSystem.enqueueImmediate(serverLevel, levelChunk.getPos());

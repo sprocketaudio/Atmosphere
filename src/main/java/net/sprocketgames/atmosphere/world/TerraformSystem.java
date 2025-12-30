@@ -117,6 +117,23 @@ public final class TerraformSystem {
         processChunk(level, data, chunk, chunkKey, seaLevel, noWaterWorldgen, grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled);
     }
 
+    public static void applyNoWaterWorldgen(ServerLevel level, LevelChunk chunk) {
+        if (!AtmosphereConfig.NO_WATER_WORLDGEN.get()) {
+            return;
+        }
+
+        TerraformIndexData data = TerraformIndexData.get(level);
+        int seaLevel = data.getWaterLevelY();
+        long chunkKey = chunk.getPos().toLong();
+        if (data.isChunkSurfaceProcessed(chunkKey, seaLevel)) {
+            return;
+        }
+
+        applyNoWaterSurface(chunk, level, seaLevel);
+        data.markChunkSurfaceProcessed(chunkKey, seaLevel);
+        level.getChunkSource().chunkMap.waitForLightBeforeSending(chunk.getPos(), 0);
+    }
+
     public static void unload(ServerLevel level, ChunkPos pos) {
         ChunkQueue queue = queueFor(level);
         queue.drop(pos.toLong());
