@@ -568,12 +568,13 @@ public final class TerraformSystem {
         int worldBaseX = chunk.getPos().getMinBlockX();
         int worldBaseZ = chunk.getPos().getMinBlockZ();
         int minBuildY = level.getMinBuildHeight();
+        int[] surfaceYs = new int[16 * 16];
+        boolean[] changedColumns = new boolean[16 * 16];
 
         for (int x = 0; x < 16; x++) {
-            int worldX = worldBaseX + x;
             for (int z = 0; z < 16; z++) {
-                int worldZ = worldBaseZ + z;
                 int surfaceY = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, x, z);
+                surfaceYs[(x << 4) | z] = surfaceY;
                 int minY = Math.max(minBuildY, surfaceY - SURFACE_DRAIN_DEPTH);
                 for (int y = surfaceY; y > waterLevelY && y >= minY; y--) {
                     int sectionIndex = chunk.getSectionIndex(y);
@@ -599,9 +600,7 @@ public final class TerraformSystem {
                         section.release();
                     }
 
-                    cursor.set(worldX, y, worldZ);
-                    level.getChunkSource().blockChanged(cursor);
-                    level.getChunkSource().getLightEngine().checkBlock(cursor);
+                    changedColumns[(x << 4) | z] = true;
                     cleared++;
                 }
             }
@@ -609,6 +608,20 @@ public final class TerraformSystem {
 
         if (cleared > 0) {
             chunk.setUnsaved(true);
+            var lightEngine = level.getChunkSource().getLightEngine();
+            for (int x = 0; x < 16; x++) {
+                int worldX = worldBaseX + x;
+                for (int z = 0; z < 16; z++) {
+                    int columnIndex = (x << 4) | z;
+                    if (!changedColumns[columnIndex]) {
+                        continue;
+                    }
+                    int surfaceY = surfaceYs[columnIndex];
+                    cursor.set(worldX, surfaceY, worldBaseZ + z);
+                    level.getChunkSource().blockChanged(cursor);
+                    lightEngine.checkBlock(cursor);
+                }
+            }
         }
 
         return cleared;
