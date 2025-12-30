@@ -37,7 +37,7 @@ public final class AtmosphereNetwork {
     }
 
     public static void sendTerraformIndex(ServerLevel level, long terraformIndex) {
-        for (ServerPlayer player : level.players()) {
+        for (ServerPlayer player : level.getServer().getPlayerList().getPlayers()) {
             sendTerraformIndex(player, terraformIndex);
         }
     }
