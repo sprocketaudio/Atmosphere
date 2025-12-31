@@ -1263,6 +1263,9 @@ public final class TerraformSystem {
                             continue;
                         }
                         ChunkPos nearby = new ChunkPos(playerChunk.x + dx, playerChunk.z + dz);
+                        if (level.getChunkSource().getChunkNow(nearby.x, nearby.z) == null) {
+                            continue;
+                        }
                         long chunkKey = nearby.toLong();
                         if (needsProcessing(data, chunkKey, seaLevel, noWaterWorldgen, terraformWaterEnabled,
                             grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
