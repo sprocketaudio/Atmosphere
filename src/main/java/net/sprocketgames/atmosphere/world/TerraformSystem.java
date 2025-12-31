@@ -350,9 +350,10 @@ public final class TerraformSystem {
             grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled);
         if (completed) {
             queue.finish(chunkKey);
+        } else if (!fromPriority) {
+            queue.requeue(chunkKey, false);
         } else {
-            boolean keepPriority = fromPriority
-                && needsPriorityProcessing(level, data, chunkKey, seaLevel, noWaterWorldgen, terraformWaterEnabled,
+            boolean keepPriority = needsPriorityProcessing(level, data, chunkKey, seaLevel, noWaterWorldgen, terraformWaterEnabled,
                 grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled);
             if (keepPriority) {
                 queue.requeue(chunkKey, true);
