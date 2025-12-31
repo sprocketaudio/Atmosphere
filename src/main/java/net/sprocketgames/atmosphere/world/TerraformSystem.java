@@ -448,7 +448,11 @@ public final class TerraformSystem {
         boolean surfaceWorkDone = processedSurface || processedGrass || processedVegetation || processedSaplings;
         if (waterNeeded) {
             WaterFillState state = getOrCreateWaterFillState(level, chunk, seaLevel);
-            if (!state.surfaceWaterDone) {
+            if (state.surfaceWaterDone && state.queue.isEmpty()) {
+                data.markChunkWaterProcessed(chunkKey, seaLevel);
+                clearWaterFillState(level, chunkKey);
+                waterComplete = true;
+            } else if (!state.surfaceWaterDone) {
                 waterResult = applySurfaceWater(chunk, level, seaLevel, state);
                 state.surfaceWaterPending = false;
                 processedWater = true;
