@@ -2144,6 +2144,7 @@ public final class TerraformSystem {
                 priorityOrder.remove(chunkKey);
                 priorityOrder.addLast(chunkKey);
             } else {
+                priorityOrder.remove(chunkKey);
                 normalOrder.remove(chunkKey);
                 backgroundOrder.remove(chunkKey);
                 if (work.background) {
