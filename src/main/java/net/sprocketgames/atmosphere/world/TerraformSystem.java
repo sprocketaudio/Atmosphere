@@ -11,6 +11,7 @@ import java.util.Map;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongLinkedOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.SectionPos;
@@ -265,6 +266,7 @@ public final class TerraformSystem {
 
         int processedChunks = 0;
         int processedPriority = 0;
+        LongOpenHashSet processedThisTick = new LongOpenHashSet();
 
         int maxChunksPerTick = AtmosphereConfig.TERRAFORM_CHUNKS_PER_TICK.get();
         int maxPriorityChunksPerTick = AtmosphereConfig.TERRAFORM_PRIORITY_CHUNKS_PER_TICK.get();
@@ -302,6 +304,12 @@ public final class TerraformSystem {
                     queueLabel,
                     pos.x,
                     pos.z);
+            }
+
+            if (!processedThisTick.add(chunkKey)) {
+                queue.requeue(chunkKey, fromPriority);
+                processedChunks++;
+                continue;
             }
 
             ChunkWork work = queue.peek(chunkKey);
