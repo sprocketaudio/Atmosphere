@@ -144,7 +144,17 @@ public final class TerraformSystem {
 
     public static void requeueLoaded(ServerLevel level) {
         ChunkQueue queue = queueFor(level);
-        queue.requeueLoaded();
+        TerraformIndexData data = TerraformIndexData.get(level);
+        int seaLevel = data.getWaterLevelY();
+        boolean noWaterWorldgen = isNoWaterWorldgen(level);
+        boolean terraformWaterEnabled = noWaterWorldgen && seaLevel > level.getMinBuildHeight();
+        boolean grassifyEnabled = data.isGrassifyEnabled();
+        boolean grassVegEnabled = data.isGrassVegetationEnabled();
+        boolean flowerVegEnabled = data.isFlowerVegetationEnabled();
+        boolean saplingEnabled = data.isSaplingEnabled();
+
+        queue.requeueLoaded(level, data, seaLevel, noWaterWorldgen, terraformWaterEnabled, grassifyEnabled,
+            grassVegEnabled, flowerVegEnabled, saplingEnabled);
     }
 
     public static void replaceGrassWithDirt(LevelChunk chunk, ServerLevel level) {
@@ -2097,13 +2107,26 @@ public final class TerraformSystem {
             backgroundOrder.remove(chunkKey);
         }
 
-        void requeueLoaded() {
+        void requeueLoaded(ServerLevel level, TerraformIndexData data, int seaLevel,
+                           boolean noWaterWorldgen, boolean terraformWaterEnabled,
+                           boolean grassifyEnabled,
+                           boolean grassVegEnabled, boolean flowerVegEnabled,
+                           boolean saplingEnabled) {
             tasks.clear();
             priorityOrder.clear();
             normalOrder.clear();
             backgroundOrder.clear();
             for (long chunkKey : loaded) {
+                if (!needsProcessing(data, chunkKey, seaLevel, noWaterWorldgen, terraformWaterEnabled, grassifyEnabled,
+                    grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
+                    continue;
+                }
+
                 ensureTaskBackground(chunkKey);
+                if (needsPriorityProcessing(level, data, chunkKey, seaLevel, noWaterWorldgen, terraformWaterEnabled,
+                    grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled)) {
+                    prioritize(chunkKey);
+                }
             }
         }
 
