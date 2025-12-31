@@ -224,7 +224,7 @@ public final class TerraformSystem {
                                                    boolean saplingEnabled) {
         return needsNonWaterProcessing(data, chunkKey, seaLevel, noWaterWorldgen, grassifyEnabled,
             grassVegEnabled, flowerVegEnabled, saplingEnabled)
-            || needsSurfaceWaterProcessing(level, data, chunkKey, seaLevel, terraformWaterEnabled);
+            || needsPriorityWaterProcessing(level, data, chunkKey, seaLevel, terraformWaterEnabled);
     }
 
     private static boolean needsNonWaterProcessing(TerraformIndexData data, long chunkKey, int seaLevel,
@@ -244,6 +244,15 @@ public final class TerraformSystem {
         }
         WaterFillState state = getWaterFillState(level, chunkKey);
         return state == null || state.waterLevel != seaLevel || !state.surfaceWaterDone;
+    }
+
+    private static boolean needsPriorityWaterProcessing(ServerLevel level, TerraformIndexData data, long chunkKey, int seaLevel,
+                                                        boolean terraformWaterEnabled) {
+        if (!needsSurfaceWaterProcessing(level, data, chunkKey, seaLevel, terraformWaterEnabled)) {
+            return false;
+        }
+        WaterFillState state = getWaterFillState(level, chunkKey);
+        return state == null || state.waterLevel != seaLevel || !state.surfaceWaterPending;
     }
 
     private static void processQueue(ServerLevel level) {
@@ -428,6 +437,7 @@ public final class TerraformSystem {
             WaterFillState state = getOrCreateWaterFillState(level, chunk, seaLevel);
             if (!state.surfaceWaterDone) {
                 waterResult = applySurfaceWater(chunk, level, seaLevel, state);
+                state.surfaceWaterPending = false;
                 processedWater = true;
                 waterComplete = false;
             } else if (!surfaceWorkDone) {
@@ -2227,6 +2237,7 @@ public final class TerraformSystem {
         private final ArrayDeque<Integer> queue;
         private boolean removedDone;
         private boolean surfaceWaterDone;
+        private boolean surfaceWaterPending;
 
         private WaterFillState(int waterLevel, int minY, int maxY, int height) {
             this.waterLevel = waterLevel;
@@ -2238,6 +2249,7 @@ public final class TerraformSystem {
             this.queue = new ArrayDeque<>();
             this.removedDone = false;
             this.surfaceWaterDone = false;
+            this.surfaceWaterPending = true;
         }
     }
 
