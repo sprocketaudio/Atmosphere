@@ -354,7 +354,11 @@ public final class TerraformSystem {
             boolean keepPriority = fromPriority
                 && needsPriorityProcessing(level, data, chunkKey, seaLevel, noWaterWorldgen, terraformWaterEnabled,
                 grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled);
-            queue.requeue(chunkKey, keepPriority);
+            if (keepPriority) {
+                queue.requeue(chunkKey, true);
+            } else {
+                queue.demoteToBackground(chunkKey);
+            }
         }
             processedChunks++;
         }
@@ -2153,6 +2157,18 @@ public final class TerraformSystem {
                     normalOrder.addLast(chunkKey);
                 }
             }
+        }
+
+        void demoteToBackground(long chunkKey) {
+            ChunkWork work = tasks.get(chunkKey);
+            if (work == null) {
+                return;
+            }
+            work.background = true;
+            priorityOrder.remove(chunkKey);
+            normalOrder.remove(chunkKey);
+            backgroundOrder.remove(chunkKey);
+            backgroundOrder.addLast(chunkKey);
         }
 
         boolean hasPriority() {
