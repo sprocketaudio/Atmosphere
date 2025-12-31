@@ -316,6 +316,14 @@ public final class TerraformSystem {
             }
 
             if (!processedThisTick.add(chunkKey)) {
+                if (AtmosphereConfig.DEBUG_LOGGING.get()) {
+                    ChunkPos pos = new ChunkPos(chunkKey);
+                    Atmosphere.LOGGER.info(
+                        "Terraform queue {} chunk ({}, {}) (skipped: already processed this tick)",
+                        queueLabel,
+                        pos.x,
+                        pos.z);
+                }
                 queue.requeue(chunkKey, fromPriority);
                 processedChunks++;
                 continue;
