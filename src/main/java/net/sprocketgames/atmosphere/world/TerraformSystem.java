@@ -278,6 +278,7 @@ public final class TerraformSystem {
                     grassifyEnabled, grassVegEnabled, flowerVegEnabled, saplingEnabled);
                 if (!fromPriority) {
                     queue.requeue(chunkKey, false);
+                    processedChunks++;
                     continue;
                 }
                 processedPriority++;
