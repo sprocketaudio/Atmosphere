@@ -40,9 +40,11 @@ public class TerraformIndexData extends SavedData {
     private static final int FEATURE_GRASS_VEGETATION = 2;
     private static final int FEATURE_FLOWER_VEGETATION = 4;
     private static final int FEATURE_SAPLINGS = 8;
+    private static final int FEATURE_WATER = 16;
     private static final int FEATURE_MASK_BITS = 16;
 
     private long terraformIndex;
+    // Virtual sea level used for no-water worldgen; stored under the existing water_level_y key for migration.
     private int waterLevelY = -64;
     private final Long2IntMap processedWaterLevels = new Long2IntOpenHashMap();
     private int hydrationRevision = CURRENT_HYDRATION_REVISION;
@@ -197,6 +199,21 @@ public class TerraformIndexData extends SavedData {
         }
     }
 
+    public boolean isChunkSurfaceProcessed(long chunkKey, int seaLevel) {
+        long state = processedStates.get(chunkKey);
+        if (state == Long.MIN_VALUE) {
+            return false;
+        }
+        return extractWaterLevel(state) == seaLevel;
+    }
+
+    public void markChunkSurfaceProcessed(long chunkKey, int seaLevel) {
+        long state = processedStates.get(chunkKey);
+        int processedMask = state == Long.MIN_VALUE ? 0 : extractProcessedMask(state);
+        int enabledMask = state == Long.MIN_VALUE ? 0 : extractEnabledMask(state);
+        setState(chunkKey, seaLevel, processedMask, enabledMask);
+    }
+
     public void ensureHydrationRevision() {
         if (hydrationRevision != CURRENT_HYDRATION_REVISION) {
             hydrationRevision = CURRENT_HYDRATION_REVISION;
@@ -216,7 +233,7 @@ public class TerraformIndexData extends SavedData {
     }
 
     public boolean isChunkProcessed(long chunkKey, int waterLevel) {
-        return isChunkWaterProcessed(chunkKey, waterLevel);
+        return isChunkSurfaceProcessed(chunkKey, waterLevel);
     }
 
     public int getProcessedWaterLevel(long chunkKey) {
@@ -228,7 +245,7 @@ public class TerraformIndexData extends SavedData {
     }
 
     public void markChunkProcessed(long chunkKey, int waterLevel) {
-        markChunkWaterProcessed(chunkKey, waterLevel);
+        markChunkSurfaceProcessed(chunkKey, waterLevel);
     }
 
     public boolean isGrassifyEnabled() {
@@ -433,7 +450,8 @@ public class TerraformIndexData extends SavedData {
         if (state == Long.MIN_VALUE) {
             return false;
         }
-        return extractWaterLevel(state) == waterLevel;
+        int processedMask = extractProcessedMask(state);
+        return extractWaterLevel(state) == waterLevel && (processedMask & FEATURE_WATER) != 0;
     }
 
     public boolean isChunkSaplingProcessed(long chunkKey, boolean saplingEnabled) {
@@ -464,6 +482,7 @@ public class TerraformIndexData extends SavedData {
         long state = processedStates.get(chunkKey);
         int processedMask = state == Long.MIN_VALUE ? 0 : extractProcessedMask(state);
         int enabledMask = state == Long.MIN_VALUE ? 0 : extractEnabledMask(state);
+        processedMask |= FEATURE_WATER;
         setState(chunkKey, waterLevel, processedMask, enabledMask);
     }
 
@@ -474,7 +493,8 @@ public class TerraformIndexData extends SavedData {
         }
         int processedMask = extractProcessedMask(state);
         int enabledMask = extractEnabledMask(state);
-        setState(chunkKey, Integer.MIN_VALUE, processedMask, enabledMask);
+        processedMask &= ~FEATURE_WATER;
+        setState(chunkKey, extractWaterLevel(state), processedMask, enabledMask);
     }
 
     public void clearChunkState(long chunkKey) {
